@@ -1,0 +1,66 @@
+name: Extrair fonte atual do MT Pack Organizer
+
+on:
+  push:
+    paths:
+      - ".github/workflows/extract-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Baixar instalador 0.9.6
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path bootstrap | Out-Null
+          gh release download v0.9.6 --repo $env:GITHUB_REPOSITORY --pattern "MT_Pack_Organizer_Setup_0.9.6.exe" --dir bootstrap
+          if ($LASTEXITCODE -ne 0) { throw "Nao consegui baixar a release v0.9.6." }
+
+      - name: Extrair runtime instalado
+        shell: pwsh
+        run: |
+          $setup = Resolve-Path "bootstrap\MT_Pack_Organizer_Setup_0.9.6.exe"
+          $proc = Start-Process -FilePath $setup -PassThru
+          $runtime = Join-Path $env:LOCALAPPDATA "MT Studio\Pack Organizer\runtime\0.9.6"
+          $source = Join-Path $runtime "MT_Pack_Organizer.ps1"
+          $deadline = (Get-Date).AddSeconds(75)
+
+          while (-not (Test-Path -LiteralPath $source)) {
+            if ((Get-Date) -gt $deadline) {
+              if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+              throw "Runtime 0.9.6 nao foi extraido a tempo."
+            }
+            Start-Sleep -Milliseconds 500
+          }
+
+          if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+
+          New-Item -ItemType Directory -Force -Path src\assets | Out-Null
+          Copy-Item -LiteralPath $source -Destination src\MT_Pack_Organizer.ps1 -Force
+
+          $logo = Join-Path $runtime "assets\mt_logo.png"
+          $icon = Join-Path $runtime "assets\mt_app_icon.ico"
+          if (Test-Path -LiteralPath $logo) { Copy-Item -LiteralPath $logo -Destination src\assets\mt_logo.png -Force }
+          if (Test-Path -LiteralPath $icon) { Copy-Item -LiteralPath $icon -Destination src\assets\mt_app_icon.ico -Force }
+
+      - name: Salvar fonte no repositorio
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src
+          if (git diff --cached --quiet) {
+            Write-Host "Nada novo para salvar."
+            exit 0
+          }
+          git commit -m "Add extracted 0.9.6 app source"
+          git push
