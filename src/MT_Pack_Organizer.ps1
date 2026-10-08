@@ -1076,11 +1076,37 @@ function Update-ModelTransform {
 }
 
 function Update-TransformBoxVisual {
-    if($null -eq $transformBox){return}
-    $baseW=[Math]::Max(150,[Math]::Min(430,$viewHost.ActualWidth*0.42))
-    $baseH=[Math]::Max(180,[Math]::Min(520,$viewHost.ActualHeight*0.62))
-    $transformBox.Width=$baseW*$script:ModelScale
-    $transformBox.Height=$baseH*$script:ModelScale
+    if($null -eq $transformBox -or $null -eq $script:ModelBounds){return}
+    $vw=[Math]::Max(320.0,[double]$viewHost.ActualWidth)
+    $vh=[Math]::Max(320.0,[double]$viewHost.ActualHeight)
+    $b=$script:ModelBounds
+
+    # A caixa acompanha a proporção real da peça na visão atual.
+    # X é largura na tela; Z é altura. Y passa a influenciar quando a peça gira.
+    $yawRad=[Math]::Abs($script:Yaw) * [Math]::PI / 180.0
+    $pitchRad=[Math]::Abs($script:Pitch) * [Math]::PI / 180.0
+    $rollRad=[Math]::Abs($script:Roll) * [Math]::PI / 180.0
+    $wUnits=([Math]::Abs([Math]::Cos($yawRad))*[double]$b.SizeX)+([Math]::Abs([Math]::Sin($yawRad))*[double]$b.SizeY)
+    $hUnits=([Math]::Abs([Math]::Cos($pitchRad))*[double]$b.SizeZ)+([Math]::Abs([Math]::Sin($pitchRad))*[double]$b.SizeY)
+    if($wUnits -lt 0.001){$wUnits=$script:ModelExtent}
+    if($hUnits -lt 0.001){$hUnits=$script:ModelExtent}
+
+    # Roll troca parte da largura/altura visual.
+    $rw=([Math]::Abs([Math]::Cos($rollRad))*$wUnits)+([Math]::Abs([Math]::Sin($rollRad))*$hUnits)
+    $rh=([Math]::Abs([Math]::Cos($rollRad))*$hUnits)+([Math]::Abs([Math]::Sin($rollRad))*$wUnits)
+
+    $ratio=$rw/[Math]::Max(0.001,$rh)
+    $maxW=$vw*0.78
+    $maxH=$vh*0.80
+    $boxH=$maxH
+    $boxW=$boxH*$ratio
+    if($boxW -gt $maxW){$boxW=$maxW;$boxH=$boxW/[Math]::Max(0.001,$ratio)}
+
+    # Folga pequena, como a caixa delimitadora do Photoshop.
+    $boxW=[Math]::Max(110.0,$boxW*1.08*$script:ModelScale)
+    $boxH=[Math]::Max(110.0,$boxH*1.08*$script:ModelScale)
+    $transformBox.Width=$boxW
+    $transformBox.Height=$boxH
     $tx=New-Object Windows.Media.TranslateTransform $script:TransformScreenX,$script:TransformScreenY
     $transformBox.RenderTransform=$tx
 }
@@ -1125,7 +1151,7 @@ function Get-MeshCached([IO.FileInfo]$ydd) {
     if($null -eq $parsed){throw "O parser 3D não retornou dados para $($ydd.Name)."}
     $script:MeshCache[$key]=$parsed
     $script:MeshCacheOrder=@($script:MeshCacheOrder) + $key
-    while(@($script:MeshCacheOrder).Count -gt 10){
+    while(@($script:MeshCacheOrder).Count -gt 48){
         $old=[string]$script:MeshCacheOrder[0]
         $script:MeshCacheOrder=@($script:MeshCacheOrder | Select-Object -Skip 1)
         if(-not [string]::IsNullOrWhiteSpace($old)){$script:MeshCache.Remove($old)}
@@ -1167,6 +1193,7 @@ function Build-Viewport([IO.FileInfo]$ydd) {
     $viewport.Children.Add($script:ModelRoot)
 
     $b = $parsed.Bounds
+    $script:ModelBounds = $b
     $script:CenterX = $b.X + $b.SizeX/2
     $script:CenterY = $b.Y + $b.SizeY/2
     $script:CenterZ = $b.Z + $b.SizeZ/2
@@ -1191,12 +1218,7 @@ function Build-Viewport([IO.FileInfo]$ydd) {
     Set-NeutralMaterial
 
     $lblMesh.Text = "$($parsed.Vertices) vértices  •  $($parsed.Triangles) triângulos"
-    try {
-        $trace = @($script:GeometryEntries | ForEach-Object {
-            "shader=$($_.ShaderId) bucket=$($_.RenderBucket) uvType=$($_.UvType) uvOffset=$($_.UvOffset) diffuse=$($_.DiffuseTexture)"
-        }) -join " | "
-        Write-AppLog ("RENDER " + $ydd.Name + " :: " + $trace)
-    } catch {}
+
 }
 
 function Get-TextureInfosCached([IO.FileInfo]$file) {
@@ -1259,7 +1281,7 @@ function Get-TexturesCached([IO.FileInfo]$file) {
     $arr = @([MtRageParser]::LoadTextures([string]$file.FullName))
     $script:TextureCache[$key] = $arr
     $script:TextureCacheOrder=@($script:TextureCacheOrder) + $key
-    while(@($script:TextureCacheOrder).Count -gt 18) {
+    while(@($script:TextureCacheOrder).Count -gt 28) {
         $oldKey=[string]$script:TextureCacheOrder[0]
         $script:TextureCacheOrder=@($script:TextureCacheOrder | Select-Object -Skip 1)
         if(-not [string]::IsNullOrWhiteSpace($oldKey)){$script:TextureCache.Remove($oldKey)}
@@ -1327,7 +1349,7 @@ function Start-ThumbnailQueue {
 
     # DispatcherTimer sem closure local: sempre trabalha na fila atual.
     $timer=New-Object Windows.Threading.DispatcherTimer
-    $timer.Interval=[TimeSpan]::FromMilliseconds(25)
+    $timer.Interval=[TimeSpan]::FromMilliseconds(160)
     $timer.Add_Tick({
         if($script:ThumbQueueIndex -ge @($script:ThumbQueue).Count){
             try{$script:ThumbTimer.Stop()}catch{}
@@ -1418,13 +1440,8 @@ function Populate-Textures([IO.FileInfo]$ydd) {
             $thumbBorder.Cursor=[Windows.Input.Cursors]::Hand
             $thumbBorder.Add_MouseEnter({ Show-TexturePreview $localItem $localThumb }.GetNewClosure())
             $thumbBorder.Add_MouseLeave({ Hide-TexturePreview })
-            $thumbBorder.Add_Loaded({ try{ Load-ThumbnailForItem $localItem }catch{} }.GetNewClosure())
             $item.Content = $grid
             $lstTextures.Items.Add($item) | Out-Null
-            # Garante miniaturas visíveis imediatamente, sem depender do hover.
-            if($lstTextures.Items.Count -le 8){
-                try { Load-ThumbnailForItem $item } catch { Write-AppLog ('Thumbnail immediate: '+$_.Exception.Message) }
-            }
         }
 
         $lblTextureCount.Text = "$($vars.Count) " + $(if($vars.Count -eq 1){'TEXTURA'}else{'TEXTURAS'})
@@ -1432,8 +1449,12 @@ function Populate-Textures([IO.FileInfo]$ydd) {
     } finally {
         $script:PopulatingTextures = $false
     }
-    if ($lstTextures.SelectedItem) { Apply-TextureItem $lstTextures.SelectedItem }
-    Start-ThumbnailQueue @($lstTextures.Items)
+    if ($lstTextures.SelectedItem) {
+        Apply-TextureItem $lstTextures.SelectedItem
+        # A primeira miniatura reutiliza a textura já decodificada para o 3D.
+        try { Load-ThumbnailForItem $lstTextures.SelectedItem } catch {}
+    }
+    Start-ThumbnailQueue @($lstTextures.Items | Select-Object -Skip 1)
     Update-TextureDeleteButton
 
 }
@@ -2209,7 +2230,7 @@ $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="MT Studio • Pack Organizer 0.9.7"
+        Title="MT Studio • Pack Organizer 0.9.8"
         Width="1480" Height="900" MinWidth="1220" MinHeight="740"
         WindowStartupLocation="CenterScreen" Background="#000000" Foreground="#FFFFFF" WindowStyle="None" ResizeMode="CanResize">
 <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/></shell:WindowChrome.WindowChrome>
@@ -2282,8 +2303,8 @@ $xamlText = @'
 
     <Border Name="topHeader" Grid.Row="1" Background="#080809" BorderBrush="#19171D" BorderThickness="0,0,0,1">
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Image Name="imgBrandLogo" Width="150" Height="67" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,22,0"/>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.7" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
+            <Border Width="132" Height="68" Background="Transparent" Margin="0,0,22,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="126" Height="64" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.8" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="ATUALIZAÇÕES" Width="112" Height="42" Margin="0,0,7,0" FontSize="9"/><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
@@ -2316,20 +2337,20 @@ $xamlText = @'
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
-                <Border BorderBrush="#9650C8" BorderThickness="1.5" CornerRadius="3" Opacity="0.95"/>
-                <Ellipse Name="rotNW" Width="14" Height="14" Fill="#C987F3" Stroke="#F2D8FF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-7,-7,0,0" Cursor="Hand" ToolTip="Rotacionar eixo Z"/>
-                <Ellipse Name="rotNE" Width="14" Height="14" Fill="#C987F3" Stroke="#F2D8FF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-7,-7,0" Cursor="Hand" ToolTip="Rotacionar eixo Z"/>
-                <Ellipse Name="rotSW" Width="14" Height="14" Fill="#C987F3" Stroke="#F2D8FF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-7,0,0,-7" Cursor="Hand" ToolTip="Rotacionar eixo Z"/>
-                <Ellipse Name="rotSE" Width="14" Height="14" Fill="#C987F3" Stroke="#F2D8FF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-7,-7" Cursor="Hand" ToolTip="Rotacionar eixo Z"/>
-                <Ellipse Name="rotTop" Width="14" Height="14" Fill="#D9A8FA" Stroke="#FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-7,0,0" Cursor="Hand" ToolTip="Rotacionar eixo X"/>
-                <Ellipse Name="rotBottom" Width="14" Height="14" Fill="#D9A8FA" Stroke="#FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-7" Cursor="Hand" ToolTip="Rotacionar eixo X"/>
-                <Ellipse Name="rotLeft" Width="14" Height="14" Fill="#D9A8FA" Stroke="#FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-7,0,0,0" Cursor="Hand" ToolTip="Rotacionar eixo Y"/>
-                <Ellipse Name="rotRight" Width="14" Height="14" Fill="#D9A8FA" Stroke="#FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-7,0" Cursor="Hand" ToolTip="Rotacionar eixo Y"/>
-                <Grid Width="126" Height="126" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
-                    <Ellipse Name="gizmoRoll" Width="98" Height="98" Stroke="#9650C8" StrokeThickness="2.5" Opacity="0.82" Cursor="Hand" ToolTip="Girar no eixo Z"/>
-                    <Ellipse Name="gizmoYaw" Width="116" Height="32" Stroke="#B76AE8" StrokeThickness="3" Opacity="0.90" Cursor="Hand" ToolTip="Girar no eixo Y"/>
-                    <Ellipse Name="gizmoPitch" Width="32" Height="116" Stroke="#B76AE8" StrokeThickness="3" Opacity="0.90" Cursor="Hand" ToolTip="Girar no eixo X"/>
-                    <Ellipse Width="13" Height="13" Fill="#E1BCFF" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Border BorderBrush="#A65DDB" BorderThickness="1.4" CornerRadius="2" Opacity="0.95"/>
+                <Ellipse Name="rotNW" Width="12" Height="12" Fill="#C987F3" Stroke="#F4DEFF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0" Cursor="Hand" ToolTip="Rotacionar livre"/>
+                <Ellipse Name="rotNE" Width="12" Height="12" Fill="#C987F3" Stroke="#F4DEFF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0" Cursor="Hand" ToolTip="Rotacionar livre"/>
+                <Ellipse Name="rotSW" Width="12" Height="12" Fill="#C987F3" Stroke="#F4DEFF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6" Cursor="Hand" ToolTip="Rotacionar livre"/>
+                <Ellipse Name="rotSE" Width="12" Height="12" Fill="#C987F3" Stroke="#F4DEFF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6" Cursor="Hand" ToolTip="Rotacionar livre"/>
+                <Rectangle Name="rotTop" Width="42" Height="7" RadiusX="3.5" RadiusY="3.5" Fill="#D49AF7" Stroke="#F2D8FF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-4,0,0" Cursor="Hand" ToolTip="Rotacionar no eixo X"/>
+                <Rectangle Name="rotBottom" Width="42" Height="7" RadiusX="3.5" RadiusY="3.5" Fill="#D49AF7" Stroke="#F2D8FF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-4" Cursor="Hand" ToolTip="Rotacionar no eixo X"/>
+                <Rectangle Name="rotLeft" Width="7" Height="42" RadiusX="3.5" RadiusY="3.5" Fill="#D49AF7" Stroke="#F2D8FF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-4,0,0,0" Cursor="Hand" ToolTip="Rotacionar no eixo Y"/>
+                <Rectangle Name="rotRight" Width="7" Height="42" RadiusX="3.5" RadiusY="3.5" Fill="#D49AF7" Stroke="#F2D8FF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-4,0" Cursor="Hand" ToolTip="Rotacionar no eixo Y"/>
+                <Grid Width="120" Height="120" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
+                    <Ellipse Name="gizmoRoll" Width="94" Height="94" Stroke="#9E55D1" StrokeThickness="2.5" Opacity="0.80" Cursor="Hand" ToolTip="Girar no eixo Z"/>
+                    <Ellipse Name="gizmoYaw" Width="112" Height="30" Stroke="#C27BF0" StrokeThickness="3" Opacity="0.92" Cursor="Hand" ToolTip="Girar no eixo Y"/>
+                    <Ellipse Name="gizmoPitch" Width="30" Height="112" Stroke="#C27BF0" StrokeThickness="3" Opacity="0.92" Cursor="Hand" ToolTip="Girar no eixo X"/>
+                    <Ellipse Width="12" Height="12" Fill="#E7C7FF" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
             <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Text="Clique na peça para selecionar • extremidades roxas = rotação por eixo • Shift = encaixe 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
@@ -2396,7 +2417,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.7'
+$script:AppVersion = '0.9.8'
 $script:UpdateRepo = '0ladymt/mt-pack-organizer-releases'
 $script:PendingUpdateRelease = $null
 $script:ThumbQueue = @()
@@ -2419,6 +2440,7 @@ $script:ModelScale=1.0
 $script:ModelOffsetX=0.0
 $script:ModelOffsetZ=0.0
 $script:ModelExtent=1.0
+$script:ModelBounds=$null
 $script:TransformScreenX=0.0
 $script:TransformScreenY=0.0
 
@@ -2527,8 +2549,8 @@ foreach($g in @($gizmoYaw,$gizmoPitch,$gizmoRoll)) {
     $g.Add_MouseLeave({param($s,$e); $s.Stroke=New-SolidBrush '#B76AE8'; $s.StrokeThickness=3})
 }
 foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE,$rotTop,$rotBottom,$rotLeft,$rotRight)) {
-    $h.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#EBCBFF'; $s.Width=18; $s.Height=18})
-    $h.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#C987F3'; $s.Width=14; $s.Height=14})
+    $h.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#F0D9FF'; $s.Opacity=1.0})
+    $h.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#D49AF7'; $s.Opacity=0.94})
 }
 
 
@@ -2620,9 +2642,12 @@ $viewHost.Add_MouseWheel({
             [Math]::Min($script:BaseCameraDistance*4.5,$script:CameraDistance*$factor)
         )
         Update-Camera
+        Update-TransformBoxVisual
         $e.Handled = $true
     }
 })
+
+$viewHost.Add_SizeChanged({ if($script:TransformBoxEnabled){ Update-TransformBoxVisual } })
 
 $win.Add_KeyDown({
     param($s,$e)
