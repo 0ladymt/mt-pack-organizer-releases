@@ -13,10 +13,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: mt-pack-organizer-release
-  cancel-in-progress: true
-
 jobs:
   build-release:
     runs-on: windows-latest
