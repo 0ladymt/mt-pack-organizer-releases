@@ -66,7 +66,15 @@ foreach($g in @($yawHandleL,$yawHandleR,$pitchHandleT,$pitchHandleB,$rollHandleA
 }
 
 '@
-$dialogPattern = '(?m)^.*\$win\.ShowDialog\(\).*
+$dialogPattern = '(?m)^.*\$win\.ShowDialog\(\).*$'
+$changed = [regex]::Replace($s,$dialogPattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $endpointCode + $m.Value },1)
+if($changed -eq $s){
+    Write-Host 'DIAGNÓSTICO ShowDialog:'
+    $s -split "[\r\n]+" | Where-Object { $_ -match 'ShowDialog|gizmoYaw|viewHost' } | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
+    throw 'Patch falhou em: ShowDialog'
+}
+$s=$changed
+
 $pattern = '(?s)function Start-ThumbnailQueue \{.*?\r?\n\}\r?\n\r?\nfunction Populate-Textures'
 $newQueue = @'
 function Start-ThumbnailQueue {
