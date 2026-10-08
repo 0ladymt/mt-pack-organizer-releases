@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: mt-pack-organizer-release
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-release:
@@ -78,16 +78,21 @@ jobs:
           BASE: ${{ steps.meta.outputs.base }}
         run: |
           $setup = Resolve-Path "bootstrap\MT_Pack_Organizer_Setup_$env:BASE.exe"
-          Start-Process -FilePath $setup -Wait
+          $proc = Start-Process -FilePath $setup -PassThru
 
           $runtime = Join-Path $env:LOCALAPPDATA "MT Studio\Pack Organizer\runtime\$env:BASE"
           $source = Join-Path $runtime "MT_Pack_Organizer.ps1"
-          $deadline = (Get-Date).AddSeconds(45)
+          $deadline = (Get-Date).AddSeconds(60)
 
           while (-not (Test-Path -LiteralPath $source)) {
-            if ((Get-Date) -gt $deadline) { throw "O runtime $env:BASE não foi extraído a tempo." }
+            if ((Get-Date) -gt $deadline) {
+              if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+              throw "O runtime $env:BASE não foi extraído a tempo."
+            }
             Start-Sleep -Milliseconds 500
           }
+
+          if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
 
           New-Item -ItemType Directory -Force -Path work\assets | Out-Null
           Copy-Item -LiteralPath $source -Destination work\MT_Pack_Organizer.ps1 -Force
@@ -110,16 +115,22 @@ jobs:
             exit 0
           }
 
-          Start-Process -FilePath (Resolve-Path "brand095\MT_Pack_Organizer_Setup_0.9.5.exe") -Wait
+          $proc = Start-Process -FilePath (Resolve-Path "brand095\MT_Pack_Organizer_Setup_0.9.5.exe") -PassThru
           $runtime095 = Join-Path $env:LOCALAPPDATA "MT Studio\Pack Organizer\runtime\0.9.5"
           $logo095 = Join-Path $runtime095 "assets\mt_logo.png"
-          $deadline = (Get-Date).AddSeconds(30)
+          $deadline = (Get-Date).AddSeconds(45)
+
           while (-not (Test-Path -LiteralPath $logo095) -and (Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 500
           }
+
+          if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+
           if (Test-Path -LiteralPath $logo095) {
             Copy-Item -LiteralPath $logo095 -Destination work\assets\mt_logo.png -Force
             Write-Host "Logo oficial da 0.9.5 recuperada."
+          } else {
+            Write-Host "Logo da 0.9.5 não foi extraída; mantendo logo da versão-base."
           }
 
       - name: Aplicar patch da nova versão
