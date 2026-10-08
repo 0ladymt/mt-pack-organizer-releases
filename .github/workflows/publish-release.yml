@@ -1,0 +1,79 @@
+name: Publicar atualização do MT Pack Organizer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "dist/MT_Pack_Organizer_Setup_*.exe"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Localizar instalador e versão
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FILE="$(find dist -maxdepth 1 -type f -name 'MT_Pack_Organizer_Setup_*.exe' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
+
+          if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then
+            echo "Nenhum instalador encontrado em dist/."
+            exit 1
+          fi
+
+          NAME="$(basename "$FILE")"
+          VERSION="$(printf '%s' "$NAME" | sed -E 's/^MT_Pack_Organizer_Setup_([0-9]+(\.[0-9]+)*)\.exe$/\1/')"
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$NAME" ]; then
+            echo "Não consegui extrair a versão de: $NAME"
+            exit 1
+          fi
+
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Criar ou atualizar Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE: ${{ steps.meta.outputs.file }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG já existe. Atualizando instalador..."
+            gh release upload "$TAG" "$FILE" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            echo "Criando Release $TAG..."
+            gh release create "$TAG" "$FILE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "MT Pack Organizer $VERSION" \
+              --notes "Atualização oficial do MT Pack Organizer — MT Studio."
+          fi
+
+      - name: Resumo
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        shell: bash
+        run: |
+          echo "### MT Pack Organizer $VERSION publicado" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release: **$TAG**" >> "$GITHUB_STEP_SUMMARY"
+          echo "O aplicativo poderá detectar esta versão pelo sistema de atualizações." >> "$GITHUB_STEP_SUMMARY"
