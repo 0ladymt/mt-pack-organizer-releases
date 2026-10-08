@@ -32,18 +32,6 @@ Replace-Required '<Style TargetType="ComboBox">' '<Style TargetType="ComboBox"><
 Replace-Required '<ToggleButton Focusable="False" Background="#01000000" BorderBrush="{x:Null}" BorderThickness="0"' '<ToggleButton Focusable="False" FocusVisualStyle="{x:Null}" OverridesDefaultStyle="True" Background="Transparent" BorderBrush="{x:Null}" BorderThickness="0"' 'toggle combobox'
 Replace-Required '<ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="#01000000"/></ControlTemplate></ToggleButton.Template>' '<ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent"/></ControlTemplate></ToggleButton.Template>' 'template combobox'
 
-$oldGizmo = @'
-<Grid Width="118" Height="118" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
-                    <Ellipse Name="gizmoRoll" Width="92" Height="92" Stroke="#8F4DB7" StrokeThickness="3" Opacity="0.75" Cursor="Hand" ToolTip="Girar no eixo Z"/>
-                    <Ellipse Name="gizmoYaw" Width="108" Height="30" Stroke="#A95FE0" StrokeThickness="3" Opacity="0.82" Cursor="Hand" ToolTip="Girar no eixo Y"/>
-                    <Ellipse Name="gizmoPitch" Width="30" Height="108" Stroke="#B36DE6" StrokeThickness="3" Opacity="0.82" Cursor="Hand" ToolTip="Girar no eixo X"/>
-                    <Line Name="gizmoX" X1="59" Y1="59" X2="108" Y2="59" Stroke="#9B4DCD" StrokeThickness="3"/>
-                    <Polygon Points="108,53 118,59 108,65" Fill="#9B4DCD"/>
-                    <Line Name="gizmoZ" X1="59" Y1="59" X2="59" Y2="10" Stroke="#B36DE6" StrokeThickness="3"/>
-                    <Polygon Points="53,10 59,0 65,10" Fill="#B36DE6"/>
-                    <Ellipse Width="12" Height="12" Fill="#DCA8FF" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Grid>
-'@
 $newGizmo = @'
 <Grid Width="142" Height="142" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
                     <Ellipse Name="gizmoRoll" Width="112" Height="112" Stroke="#9D58C7" StrokeThickness="3" Opacity="0.90" Cursor="Hand" ToolTip="Girar no eixo Z"/>
@@ -62,18 +50,12 @@ $newGizmo = @'
                     <Ellipse Width="14" Height="14" Fill="#E3BEFF" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>
 '@
-Replace-Required $oldGizmo $newGizmo 'gizmo'
+$gizmoPattern = '(?s)<Grid Width="118" Height="118"[^>]*>\s*<Ellipse Name="gizmoRoll".*?</Grid>'
+$changed = [regex]::Replace($s,$gizmoPattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $newGizmo },1)
+if($changed -eq $s){ throw 'Patch falhou em: gizmo' }
+$s=$changed
 Replace-Required "'gizmoYaw','gizmoPitch','gizmoRoll','gizmoX','gizmoZ'" "'gizmoYaw','gizmoPitch','gizmoRoll','yawHandleL','yawHandleR','pitchHandleT','pitchHandleB','rollHandleA','rollHandleB','gizmoX','gizmoZ'" 'nomes do gizmo'
 
-$oldEvents = @'
-$gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e})
-$gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
-$gizmoRoll.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
-foreach($g in @($gizmoYaw,$gizmoPitch,$gizmoRoll)) {
-    $g.Add_MouseEnter({param($s,$e); $s.Stroke=New-SolidBrush '#E4B6FF'; $s.StrokeThickness=4})
-    $g.Add_MouseLeave({param($s,$e); $s.Stroke=New-SolidBrush '#A95FE0'; $s.StrokeThickness=3})
-}
-'@
 $newEvents = @'
 $gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e})
 $gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
@@ -90,7 +72,10 @@ foreach($g in @($yawHandleL,$yawHandleR,$pitchHandleT,$pitchHandleB,$rollHandleA
     $g.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#DDAEFF'; $s.Width=12; $s.Height=12})
 }
 '@
-Replace-Required $oldEvents $newEvents 'eventos de rotação'
+$eventsPattern = '(?s)\$gizmoYaw\.Add_MouseLeftButtonDown\(.*?foreach\(\$g in @\(\$gizmoYaw,\$gizmoPitch,\$gizmoRoll\)\) \{.*?\r?\n\}'
+$changed = [regex]::Replace($s,$eventsPattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $newEvents },1)
+if($changed -eq $s){ throw 'Patch falhou em: eventos de rotação' }
+$s=$changed
 
 $pattern = '(?s)function Start-ThumbnailQueue \{.*?\r?\n\}\r?\n\r?\nfunction Populate-Textures'
 $newQueue = @'
