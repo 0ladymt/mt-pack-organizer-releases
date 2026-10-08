@@ -29,10 +29,14 @@ jobs:
         id: meta
         shell: pwsh
         run: |
-          $patch = Get-Content -Raw -LiteralPath "patches/current.ps1"
-          $base = [regex]::Match($patch, "\$BaseVersion\s*=\s*'([^']+)'").Groups[1].Value
-          $target = [regex]::Match($patch, "\$TargetVersion\s*=\s*'([^']+)'").Groups[1].Value
-          if (-not $base -or -not $target) { throw "BaseVersion/TargetVersion não encontrados no patch." }
+          $lines = Get-Content -LiteralPath "patches/current.ps1"
+          $baseLine = $lines | Where-Object { $_ -like '$BaseVersion*' } | Select-Object -First 1
+          $targetLine = $lines | Where-Object { $_ -like '$TargetVersion*' } | Select-Object -First 1
+          if (-not $baseLine -or -not $targetLine) { throw "BaseVersion/TargetVersion não encontrados no patch." }
+
+          $base = ($baseLine -split "'")[1]
+          $target = ($targetLine -split "'")[1]
+          if (-not $base -or -not $target) { throw "Não consegui ler as versões do patch." }
 
           "base=$base" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "target=$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
