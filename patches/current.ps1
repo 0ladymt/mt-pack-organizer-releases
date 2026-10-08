@@ -56,7 +56,6 @@ if($changed -eq $s){ throw 'Patch falhou em: gizmo' }
 $s=$changed
 Replace-Required "'gizmoYaw','gizmoPitch','gizmoRoll','gizmoX','gizmoZ'" "'gizmoYaw','gizmoPitch','gizmoRoll','yawHandleL','yawHandleR','pitchHandleT','pitchHandleB','rollHandleA','rollHandleB','gizmoX','gizmoZ'" 'nomes do gizmo'
 
-$dialogMarker = '$win.ShowDialog() | Out-Null'
 $endpointCode = @'
 foreach($g in @($yawHandleL,$yawHandleR)) { $g.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e}) }
 foreach($g in @($pitchHandleT,$pitchHandleB)) { $g.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e}) }
@@ -67,8 +66,55 @@ foreach($g in @($yawHandleL,$yawHandleR,$pitchHandleT,$pitchHandleB,$rollHandleA
 }
 
 '@
-if(-not $s.Contains($dialogMarker)){ throw 'Patch falhou em: dialog marker' }
-$s=$s.Replace($dialogMarker,$endpointCode + $dialogMarker)
+$dialogPattern = '(?m)^.*\$win\.ShowDialog\(\).*
+$pattern = '(?s)function Start-ThumbnailQueue \{.*?\r?\n\}\r?\n\r?\nfunction Populate-Textures'
+$newQueue = @'
+function Start-ThumbnailQueue {
+    param([object[]]$Items)
+    $script:ThumbGeneration = [int]$script:ThumbGeneration + 1
+    $generation = $script:ThumbGeneration
+    $queue = @($Items | Where-Object { $_ -and $_.Tag })
+    if($queue.Count -eq 0){ return }
+
+    foreach($it in $queue) {
+        $localItem = $it
+        $localGeneration = $generation
+        $action = [Action]{
+            try {
+                if($script:ThumbGeneration -eq $localGeneration -and $localItem){
+                    Load-ThumbnailForItem $localItem
+                }
+            } catch { Write-AppLog ('Thumbnail dispatcher: '+$_.Exception.Message) }
+        }.GetNewClosure()
+        $null = $win.Dispatcher.BeginInvoke($action,[Windows.Threading.DispatcherPriority]::Background)
+    }
+}
+
+function Populate-Textures
+'@
+$changed = [regex]::Replace($s,$pattern,$newQueue,1)
+if($changed -eq $s){ throw 'Patch falhou em: fila de miniaturas' }
+$s=$changed
+
+$nl=[Environment]::NewLine
+Replace-Required '$script:PopulatingTextures = $false' ('$script:PopulatingTextures = $false'+$nl+'$script:ThumbGeneration = 0') 'contador de miniaturas'
+Replace-Required 'if ($lstTextures.SelectedItem) { Apply-TextureItem $lstTextures.SelectedItem }' 'if ($lstTextures.SelectedItem) { Apply-TextureItem $lstTextures.SelectedItem; Load-ThumbnailForItem $lstTextures.SelectedItem }' 'primeira miniatura'
+
+Replace-Required 'Clique na peça para selecionar • anéis roxos = rotação por eixo • cantos = escala • Shift = encaixe 5°' 'Clique na peça • controles lilás = rotação por eixo • cantos = escala • Shift = encaixe 5°' 'texto do viewer'
+Replace-Required '<Image Name="imgBrandLogo" Width="150" Height="67"' '<Image Name="imgBrandLogo" Width="166" Height="72"' 'logo no header'
+Replace-Required '<Border Grid.Column="0" Background="#101014" CornerRadius="14" BorderBrush="#29252F"' '<Border Grid.Column="0" Background="#0E0E12" CornerRadius="14" BorderBrush="#302A36"' 'painel esquerdo'
+Replace-Required '<Border Grid.Column="4" Background="#111114" CornerRadius="13" BorderBrush="#2D2931"' '<Border Grid.Column="4" Background="#0E0E12" CornerRadius="13" BorderBrush="#302A36"' 'painel direito'
+
+Set-Content -LiteralPath $SourcePath -Value $s -Encoding UTF8
+Write-Host "Patch $TargetVersion aplicado com sucesso."
+
+$changed = [regex]::Replace($s,$dialogPattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $endpointCode + $m.Value },1)
+if($changed -eq $s){
+    Write-Host 'DIAGNÓSTICO ShowDialog:'
+    $s -split "[\r\n]+" | Where-Object { $_ -match 'ShowDialog|gizmoYaw|viewHost' } | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
+    throw 'Patch falhou em: ShowDialog'
+}
+$s=$changed
 
 $pattern = '(?s)function Start-ThumbnailQueue \{.*?\r?\n\}\r?\n\r?\nfunction Populate-Textures'
 $newQueue = @'
