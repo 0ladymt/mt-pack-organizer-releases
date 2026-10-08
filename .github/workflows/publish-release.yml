@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "patches/current.ps1"
+      - "src/**"
       - "patches/notes.md"
       - ".github/workflows/publish-release.yml"
   workflow_dispatch:
@@ -21,22 +21,15 @@ jobs:
       - name: Baixar repositório
         uses: actions/checkout@v4
 
-      - name: Ler versões do patch
+      - name: Ler versão diretamente da fonte
         id: meta
         shell: pwsh
         run: |
-          $lines = Get-Content -LiteralPath "patches/current.ps1"
-          $baseLine = $lines | Where-Object { $_ -like '$BaseVersion*' } | Select-Object -First 1
-          $targetLine = $lines | Where-Object { $_ -like '$TargetVersion*' } | Select-Object -First 1
-          if (-not $baseLine -or -not $targetLine) { throw "BaseVersion/TargetVersion não encontrados no patch." }
-
-          $base = ($baseLine -split "'")[1]
-          $target = ($targetLine -split "'")[1]
-          if (-not $base -or -not $target) { throw "Não consegui ler as versões do patch." }
-
-          "base=$base" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $src = Get-Content -Raw -LiteralPath "src\MT_Pack_Organizer.ps1"
+          $m = [regex]::Match($src, "\$script:AppVersion\s*=\s*'([^']+)'")
+          if (-not $m.Success) { throw "AppVersion não encontrada em src/MT_Pack_Organizer.ps1." }
+          $target = $m.Groups[1].Value
           "target=$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "base_tag=v$base" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "target_tag=v$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Verificar se a release já existe
@@ -54,49 +47,21 @@ jobs:
           }
           exit 0
 
-      - name: Baixar versão-base
+      - name: Preparar fonte direta
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
-          BASE: ${{ steps.meta.outputs.base }}
-          BASE_TAG: ${{ steps.meta.outputs.base_tag }}
+          TARGET: ${{ steps.meta.outputs.target }}
         run: |
-          New-Item -ItemType Directory -Force -Path bootstrap | Out-Null
-          $name = "MT_Pack_Organizer_Setup_$env:BASE.exe"
-          gh release download $env:BASE_TAG --repo $env:GITHUB_REPOSITORY --pattern $name --dir bootstrap
-          if ($LASTEXITCODE -ne 0) { throw "Não consegui baixar $env:BASE_TAG." }
-
-      - name: Extrair runtime da versão-base
-        if: steps.existing.outputs.exists != 'true'
-        shell: pwsh
-        env:
-          BASE: ${{ steps.meta.outputs.base }}
-        run: |
-          $setup = Resolve-Path "bootstrap\MT_Pack_Organizer_Setup_$env:BASE.exe"
-          $proc = Start-Process -FilePath $setup -PassThru
-
-          $runtime = Join-Path $env:LOCALAPPDATA "MT Studio\Pack Organizer\runtime\$env:BASE"
-          $source = Join-Path $runtime "MT_Pack_Organizer.ps1"
-          $deadline = (Get-Date).AddSeconds(60)
-
-          while (-not (Test-Path -LiteralPath $source)) {
-            if ((Get-Date) -gt $deadline) {
-              if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
-              throw "O runtime $env:BASE não foi extraído a tempo."
-            }
-            Start-Sleep -Milliseconds 500
-          }
-
-          if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
-
           New-Item -ItemType Directory -Force -Path work\assets | Out-Null
-          Copy-Item -LiteralPath $source -Destination work\MT_Pack_Organizer.ps1 -Force
+          Copy-Item -LiteralPath "src\MT_Pack_Organizer.ps1" -Destination "work\MT_Pack_Organizer.ps1" -Force
+          Copy-Item -LiteralPath "src\assets\mt_logo.png" -Destination "work\assets\mt_logo.png" -Force
+          Copy-Item -LiteralPath "src\assets\mt_app_icon.ico" -Destination "work\assets\mt_app_icon.ico" -Force
 
-          $baseLogo = Join-Path $runtime "assets\mt_logo.png"
-          $baseIcon = Join-Path $runtime "assets\mt_app_icon.ico"
-          if (Test-Path $baseLogo) { Copy-Item $baseLogo work\assets\mt_logo.png -Force }
-          if (Test-Path $baseIcon) { Copy-Item $baseIcon work\assets\mt_app_icon.ico -Force }
+          $src = Get-Content -Raw -LiteralPath "work\MT_Pack_Organizer.ps1"
+          if ($src -notmatch [regex]::Escape($env:TARGET)) { throw "A versão $env:TARGET não apareceu na fonte." }
+          if (-not (Test-Path "work\assets\mt_logo.png")) { throw "Logo não encontrada." }
+          if (-not (Test-Path "work\assets\mt_app_icon.ico")) { throw "Ícone borboleta não encontrado." }
 
       - name: Recuperar logo oficial da 0.9.5
         if: steps.existing.outputs.exists != 'true'
@@ -107,7 +72,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path brand095 | Out-Null
           gh release download v0.9.5 --repo $env:GITHUB_REPOSITORY --pattern "MT_Pack_Organizer_Setup_0.9.5.exe" --dir brand095
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "0.9.5 indisponível; mantendo logo da versão-base."
+            Write-Host "0.9.5 indisponível; mantendo a logo da fonte."
             exit 0
           }
 
@@ -119,29 +84,14 @@ jobs:
           while (-not (Test-Path -LiteralPath $logo095) -and (Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 500
           }
-
           if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
 
           if (Test-Path -LiteralPath $logo095) {
-            Copy-Item -LiteralPath $logo095 -Destination work\assets\mt_logo.png -Force
-            Write-Host "Logo oficial da 0.9.5 recuperada."
+            Copy-Item -LiteralPath $logo095 -Destination "work\assets\mt_logo.png" -Force
+            Write-Host "Logo oficial da 0.9.5 aplicada."
           } else {
-            Write-Host "Logo da 0.9.5 não foi extraída; mantendo logo da versão-base."
+            Write-Host "Logo da 0.9.5 não extraída; mantendo a logo da fonte."
           }
-
-      - name: Aplicar patch da nova versão
-        if: steps.existing.outputs.exists != 'true'
-        shell: pwsh
-        env:
-          TARGET: ${{ steps.meta.outputs.target }}
-        run: |
-          & ".\patches\current.ps1" -SourcePath (Resolve-Path "work\MT_Pack_Organizer.ps1")
-          if ($LASTEXITCODE -ne 0) { throw "Patch falhou." }
-
-          $src = Get-Content -Raw -LiteralPath "work\MT_Pack_Organizer.ps1"
-          if ($src -notmatch [regex]::Escape($env:TARGET)) { throw "A versão $env:TARGET não apareceu no código final." }
-          if (-not (Test-Path "work\assets\mt_logo.png")) { throw "Logo não encontrada." }
-          if (-not (Test-Path "work\assets\mt_app_icon.ico")) { throw "Ícone borboleta não encontrado." }
 
       - name: Preparar ferramentas Go
         if: steps.existing.outputs.exists != 'true'
@@ -326,7 +276,11 @@ jobs:
           TAG: ${{ steps.meta.outputs.target_tag }}
         run: |
           $file = "build\installer\MT_Pack_Organizer_Setup_$env:VERSION.exe"
-          gh release create $env:TAG $file --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "MT Pack Organizer $env:VERSION" --notes-file "patches\notes.md"
+          if (Test-Path "patches\notes.md") {
+            gh release create $env:TAG $file --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "MT Pack Organizer $env:VERSION" --notes-file "patches\notes.md"
+          } else {
+            gh release create $env:TAG $file --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "MT Pack Organizer $env:VERSION" --notes "Atualização automática do MT Pack Organizer."
+          }
           if ($LASTEXITCODE -ne 0) { throw "Falha ao publicar $env:TAG." }
 
       - name: Resumo
