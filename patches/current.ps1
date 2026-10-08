@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$BaseVersion = '0.9.6'
 $TargetVersion = '0.9.7'
 $s = Get-Content -LiteralPath $SourcePath -Raw -Encoding UTF8
 
