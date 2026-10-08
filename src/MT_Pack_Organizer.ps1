@@ -1421,6 +1421,10 @@ function Populate-Textures([IO.FileInfo]$ydd) {
             $thumbBorder.Add_Loaded({ try{ Load-ThumbnailForItem $localItem }catch{} }.GetNewClosure())
             $item.Content = $grid
             $lstTextures.Items.Add($item) | Out-Null
+            # Garante miniaturas visíveis imediatamente, sem depender do hover.
+            if($lstTextures.Items.Count -le 8){
+                try { Load-ThumbnailForItem $item } catch { Write-AppLog ('Thumbnail immediate: '+$_.Exception.Message) }
+            }
         }
 
         $lblTextureCount.Text = "$($vars.Count) " + $(if($vars.Count -eq 1){'TEXTURA'}else{'TEXTURAS'})
@@ -2205,7 +2209,7 @@ $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="MT Studio • Pack Organizer 0.9.6"
+        Title="MT Studio • Pack Organizer 0.9.7"
         Width="1480" Height="900" MinWidth="1220" MinHeight="740"
         WindowStartupLocation="CenterScreen" Background="#000000" Foreground="#FFFFFF" WindowStyle="None" ResizeMode="CanResize">
 <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/></shell:WindowChrome.WindowChrome>
@@ -2248,7 +2252,7 @@ $xamlText = @'
                         <TextBlock Text="⌄" Foreground="#C86EFF" FontSize="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,3"/>
                     </Grid>
                 </Border>
-                <ToggleButton Focusable="False" Background="#01000000" BorderBrush="{x:Null}" BorderThickness="0"
+                <ToggleButton Focusable="False" Background="Transparent" Foreground="Transparent" BorderBrush="Transparent" BorderThickness="0"
                               IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
                     <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="#01000000"/></ControlTemplate></ToggleButton.Template>
                 </ToggleButton>
@@ -2279,7 +2283,7 @@ $xamlText = @'
     <Border Name="topHeader" Grid.Row="1" Background="#080809" BorderBrush="#19171D" BorderThickness="0,0,0,1">
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Image Name="imgBrandLogo" Width="150" Height="67" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,22,0"/>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.6" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.7" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="ATUALIZAÇÕES" Width="112" Height="42" Margin="0,0,7,0" FontSize="9"/><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
@@ -2291,11 +2295,11 @@ $xamlText = @'
         </Border>
     </Grid>
 
-    <Grid Grid.Row="2" Name="mainContent" Visibility="Collapsed" Margin="18,8,18,0">
+    <Grid Grid.Row="2" Name="mainContent" Visibility="Collapsed" Margin="18,8,18,14">
         <Grid.ColumnDefinitions><ColumnDefinition Width="342"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="#101014" CornerRadius="14" BorderBrush="#29252F" BorderThickness="1" Padding="15"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="PEÇA" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Foreground="#68646D" FontSize="9" TextWrapping="Wrap" Margin="0,3,0,0"/><TextBlock Name="lblMesh" Foreground="#77717D" FontSize="9" Margin="0,5,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C174F0" FontSize="8.5" FontWeight="SemiBold" Margin="0,7,0,0"/></StackPanel>
-            <StackPanel Grid.Row="1" Margin="0,14,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnPrev" Content="‹  ANTERIOR" Height="39" Margin="0,0,5,0"/><Button Name="btnNext" Grid.Column="1" Content="PRÓXIMA  ›" Height="39" Margin="5,0,0,0"/></Grid><Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnFirst" Content="⏮  INÍCIO" Height="31" FontSize="9" Margin="0,0,5,0"/><Button Name="btnLast" Grid.Column="1" Content="FIM  ⏭" Height="31" FontSize="9" Margin="5,0,0,0"/></Grid></StackPanel>
+            <StackPanel><TextBlock Text="PEÇA" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Visibility="Collapsed"/><TextBlock Name="lblMesh" Foreground="#77717D" FontSize="9" Margin="0,5,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C174F0" FontSize="8.5" FontWeight="SemiBold" Margin="0,7,0,0"/></StackPanel>
+            <StackPanel Grid.Row="1" Margin="0,14,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnPrev" Content="‹  ANTERIOR" Height="39" Margin="0,0,5,0"/><Button Name="btnNext" Grid.Column="1" Content="PRÓXIMA  ›" Height="39" Margin="5,0,0,0"/></Grid><Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnFirst" Content="INÍCIO" Height="34" FontSize="11" FontWeight="Bold" Margin="0,0,5,0"/><Button Name="btnLast" Grid.Column="1" Content="FIM" Height="34" FontSize="11" FontWeight="Bold" Margin="5,0,0,0"/></Grid></StackPanel>
             <Border Grid.Row="2" Background="#0C0C10" BorderBrush="#29252F" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,11,0,0">
                 <StackPanel>
                     <TextBlock Text="FILTRAR POR CATEGORIA" Foreground="#D88BFF" FontSize="9" FontWeight="Bold"/>
@@ -2306,29 +2310,29 @@ $xamlText = @'
             <Separator Grid.Row="3" Margin="0,12,0,10" Background="#2D2931"/>
             <Grid Grid.Row="4"><TextBlock Text="TEXTURAS" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblTextureCount" Text="0 TEXTURAS" Foreground="#68646D" FontSize="9" HorizontalAlignment="Right"/></Grid>
             <TextBlock Grid.Row="5" Text="Miniatura • formato • resolução" Foreground="#68646D" FontSize="9" Margin="0,5,0,8"/>
-            <Grid Grid.Row="6"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ListBox Name="lstTextures"/><TextBlock Name="lblTextureInfo" Grid.Row="1" Foreground="#8E8992" FontSize="9" TextWrapping="Wrap" Margin="0,7,0,0"/><Button Name="btnDeleteTexture" Grid.Row="2" Content="EXCLUIR TEXTURA SELECIONADA" Height="38" Margin="0,8,0,0" Background="#211619" BorderBrush="#8E3D4A" Foreground="#FFB5BE"/></Grid>
+            <Grid Grid.Row="6"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ListBox Name="lstTextures"/><TextBlock Name="lblTextureInfo" Grid.Row="1" Foreground="#8E8992" FontSize="9" TextWrapping="Wrap" Margin="0,7,0,0"/><Button Name="btnDeleteTexture" Grid.Row="2" Content="EXCLUIR TEXTURA SELECIONADA" Height="40" Margin="0,10,0,12" Background="#211619" BorderBrush="#8E3D4A" Foreground="#FFB5BE"/></Grid>
         </Grid></Border>
 
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
-            <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000" Cursor="SizeAll">
-                <Border BorderBrush="#9B4DCD" BorderThickness="1" CornerRadius="3" Opacity="0.8"/>
-                <Rectangle Name="handleNW" Width="10" Height="10" Fill="#151219" Stroke="#C77BFF" StrokeThickness="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-5,-5,0,0" Cursor="SizeNWSE"/>
-                <Rectangle Name="handleNE" Width="10" Height="10" Fill="#151219" Stroke="#C77BFF" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0" Cursor="SizeNESW"/>
-                <Rectangle Name="handleSW" Width="10" Height="10" Fill="#151219" Stroke="#C77BFF" StrokeThickness="2" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-5,0,0,-5" Cursor="SizeNESW"/>
-                <Rectangle Name="handleSE" Width="10" Height="10" Fill="#151219" Stroke="#C77BFF" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-5,-5" Cursor="SizeNWSE"/>
-                <Grid Width="118" Height="118" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
-                    <Ellipse Name="gizmoRoll" Width="92" Height="92" Stroke="#8F4DB7" StrokeThickness="3" Opacity="0.75" Cursor="Hand" ToolTip="Girar no eixo Z"/>
-                    <Ellipse Name="gizmoYaw" Width="108" Height="30" Stroke="#A95FE0" StrokeThickness="3" Opacity="0.82" Cursor="Hand" ToolTip="Girar no eixo Y"/>
-                    <Ellipse Name="gizmoPitch" Width="30" Height="108" Stroke="#B36DE6" StrokeThickness="3" Opacity="0.82" Cursor="Hand" ToolTip="Girar no eixo X"/>
-                    <Line Name="gizmoX" X1="59" Y1="59" X2="108" Y2="59" Stroke="#9B4DCD" StrokeThickness="3"/>
-                    <Polygon Points="108,53 118,59 108,65" Fill="#9B4DCD"/>
-                    <Line Name="gizmoZ" X1="59" Y1="59" X2="59" Y2="10" Stroke="#B36DE6" StrokeThickness="3"/>
-                    <Polygon Points="53,10 59,0 65,10" Fill="#B36DE6"/>
-                    <Ellipse Width="12" Height="12" Fill="#DCA8FF" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
+                <Border BorderBrush="#9650C8" BorderThickness="1.5" CornerRadius="3" Opacity="0.95"/>
+                <Ellipse Name="rotNW" Width="14" Height="14" Fill="#C987F3" Stroke="#F2D8FF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-7,-7,0,0" Cursor="Hand" ToolTip="Rotacionar eixo Z"/>
+                <Ellipse Name="rotNE" Width="14" Height="14" Fill="#C987F3" Stroke="#F2D8FF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-7,-7,0" Cursor="Hand" ToolTip="Rotacionar eixo Z"/>
+                <Ellipse Name="rotSW" Width="14" Height="14" Fill="#C987F3" Stroke="#F2D8FF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-7,0,0,-7" Cursor="Hand" ToolTip="Rotacionar eixo Z"/>
+                <Ellipse Name="rotSE" Width="14" Height="14" Fill="#C987F3" Stroke="#F2D8FF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-7,-7" Cursor="Hand" ToolTip="Rotacionar eixo Z"/>
+                <Ellipse Name="rotTop" Width="14" Height="14" Fill="#D9A8FA" Stroke="#FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-7,0,0" Cursor="Hand" ToolTip="Rotacionar eixo X"/>
+                <Ellipse Name="rotBottom" Width="14" Height="14" Fill="#D9A8FA" Stroke="#FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-7" Cursor="Hand" ToolTip="Rotacionar eixo X"/>
+                <Ellipse Name="rotLeft" Width="14" Height="14" Fill="#D9A8FA" Stroke="#FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-7,0,0,0" Cursor="Hand" ToolTip="Rotacionar eixo Y"/>
+                <Ellipse Name="rotRight" Width="14" Height="14" Fill="#D9A8FA" Stroke="#FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-7,0" Cursor="Hand" ToolTip="Rotacionar eixo Y"/>
+                <Grid Width="126" Height="126" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
+                    <Ellipse Name="gizmoRoll" Width="98" Height="98" Stroke="#9650C8" StrokeThickness="2.5" Opacity="0.82" Cursor="Hand" ToolTip="Girar no eixo Z"/>
+                    <Ellipse Name="gizmoYaw" Width="116" Height="32" Stroke="#B76AE8" StrokeThickness="3" Opacity="0.90" Cursor="Hand" ToolTip="Girar no eixo Y"/>
+                    <Ellipse Name="gizmoPitch" Width="32" Height="116" Stroke="#B76AE8" StrokeThickness="3" Opacity="0.90" Cursor="Hand" ToolTip="Girar no eixo X"/>
+                    <Ellipse Width="13" Height="13" Fill="#E1BCFF" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
-            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Text="Clique na peça para selecionar • anéis roxos = rotação por eixo • cantos = escala • Shift = encaixe 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Text="Clique na peça para selecionar • extremidades roxas = rotação por eixo • Shift = encaixe 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
         </Grid></Border>
 
         <Border Grid.Column="4" Background="#111114" CornerRadius="13" BorderBrush="#2D2931" BorderThickness="1" Padding="15"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
@@ -2369,7 +2373,7 @@ try {
 foreach($n in @(
     'btnOpen','btnUpdate','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','transformBox','handleNW','handleNE','handleSW','handleSE','gizmoYaw','gizmoPitch','gizmoRoll','gizmoX','gizmoZ','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -2392,7 +2396,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.6'
+$script:AppVersion = '0.9.7'
 $script:UpdateRepo = '0ladymt/mt-pack-organizer-releases'
 $script:PendingUpdateRelease = $null
 $script:ThumbQueue = @()
@@ -2451,16 +2455,17 @@ $script:CategoryItems=@(
     [pscustomobject]@{Key='all';Display='TODAS AS CATEGORIAS'},
     [pscustomobject]@{Key='head';Display='HEAD • CABEÇA'},[pscustomobject]@{Key='berd';Display='BERD • MÁSCARAS'},[pscustomobject]@{Key='hair';Display='HAIR • CABELOS'},
     [pscustomobject]@{Key='uppr';Display='UPPR • PARTE SUPERIOR'},[pscustomobject]@{Key='lowr';Display='LOWR • CALÇAS / PERNAS'},[pscustomobject]@{Key='hand';Display='HAND • MÃOS'},
-    [pscustomobject]@{Key='feet';Display='FEET • SAPATOS'},[pscustomobject]@{Key='teef';Display='TEEF • DENTES'},[pscustomobject]@{Key='accs';Display='ACCS • ACESSÓRIOS'},
-    [pscustomobject]@{Key='task';Display='TASK • COLETES / EQUIP.'},[pscustomobject]@{Key='decl';Display='DECL • DECAL / SOBREPOSIÇÃO'},[pscustomobject]@{Key='jbib';Display='JBIB • BLUSAS / JAQUETAS'},
-    [pscustomobject]@{Key='p_head';Display='P_HEAD • CHAPÉUS'},[pscustomobject]@{Key='p_eyes';Display='P_EYES • ÓCULOS'},[pscustomobject]@{Key='p_ears';Display='P_EARS • ORELHAS'},
-    [pscustomobject]@{Key='p_lwrist';Display='P_LWRIST • PULSO ESQ.'},[pscustomobject]@{Key='p_rwrist';Display='P_RWRIST • PULSO DIR.'}
+    [pscustomobject]@{Key='feet';Display='FEET • SAPATOS'},[pscustomobject]@{Key='teef';Display='TEEF • ACESSÓRIOS'},[pscustomobject]@{Key='accs';Display='ACCS • CAMISAS'},
+    [pscustomobject]@{Key='task';Display='TASK • COLETES'},[pscustomobject]@{Key='decl';Display='DECL • ADESIVOS'},[pscustomobject]@{Key='jbib';Display='JBIB • JAQUETAS'},
+    [pscustomobject]@{Key='p_head';Display='P_HEAD • CHAPÉUS'},[pscustomobject]@{Key='p_eyes';Display='P_EYES • ÓCULOS'},[pscustomobject]@{Key='p_ears';Display='P_EARS • BRINCOS'},
+    [pscustomobject]@{Key='p_lwrist';Display='P_LWRIST • RELÓGIOS'},[pscustomobject]@{Key='p_rwrist';Display='P_RWRIST • BRACELETES'}
 )
 $cmbCategory.ItemsSource=$script:CategoryItems
 $cmbCategory.SelectedValue='all'
 $cmbCategory.Add_SelectionChanged({
     if($script:UpdatingPieceOptions -or $script:Pieces.Count -eq 0){return}
-    $val=[string]$cmbCategory.SelectedValue
+    $sel=$cmbCategory.SelectedItem
+    $val=if($sel -and $sel.PSObject.Properties['Key']){[string]$sel.Key}else{[string]$cmbCategory.SelectedValue}
     if([string]::IsNullOrWhiteSpace($val)){return}
     $script:SelectedCategoryFilter=$val
     $indices=@(Get-FilteredPieceIndices)
@@ -2511,15 +2516,19 @@ function Start-TransformDrag([string]$mode,$e) {
 }
 
 $transformBox.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE' $e})
-foreach($h in @($handleNW,$handleNE,$handleSW,$handleSE)) {
-    $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'SCALE' $e})
-}
+foreach($h in @($rotLeft,$rotRight)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e}) }
+foreach($h in @($rotTop,$rotBottom)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e}) }
+foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e}) }
 $gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e})
 $gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
 $gizmoRoll.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
 foreach($g in @($gizmoYaw,$gizmoPitch,$gizmoRoll)) {
-    $g.Add_MouseEnter({param($s,$e); $s.Stroke=New-SolidBrush '#E4B6FF'; $s.StrokeThickness=4})
-    $g.Add_MouseLeave({param($s,$e); $s.Stroke=New-SolidBrush '#A95FE0'; $s.StrokeThickness=3})
+    $g.Add_MouseEnter({param($s,$e); $s.Stroke=New-SolidBrush '#E7C3FF'; $s.StrokeThickness=4})
+    $g.Add_MouseLeave({param($s,$e); $s.Stroke=New-SolidBrush '#B76AE8'; $s.StrokeThickness=3})
+}
+foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE,$rotTop,$rotBottom,$rotLeft,$rotRight)) {
+    $h.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#EBCBFF'; $s.Width=18; $s.Height=18})
+    $h.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#C987F3'; $s.Width=14; $s.Height=14})
 }
 
 
