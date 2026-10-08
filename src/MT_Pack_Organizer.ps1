@@ -1075,40 +1075,54 @@ function Update-ModelTransform {
     Update-TransformBoxVisual
 }
 
-function Update-TransformBoxVisual {
-    if($null -eq $transformBox -or $null -eq $script:ModelBounds){return}
-    $vw=[Math]::Max(320.0,[double]$viewHost.ActualWidth)
-    $vh=[Math]::Max(320.0,[double]$viewHost.ActualHeight)
+function Get-ProjectedModelBounds {
+    if($null -eq $script:ModelBounds -or $null -eq $script:ModelRoot -or $null -eq $script:Camera){return $null}
+    $vw=[double]$viewHost.ActualWidth
+    $vh=[double]$viewHost.ActualHeight
+    if($vw -lt 20 -or $vh -lt 20){return $null}
     $b=$script:ModelBounds
+    $matrix=$script:ModelRoot.Transform.Value
+    $tanH=[Math]::Tan((([double]$script:Camera.FieldOfView * [Math]::PI / 180.0) / 2.0))
+    if($tanH -le 0){return $null}
+    $aspect=$vw/$vh
+    $tanV=$tanH/[Math]::Max(0.01,$aspect)
+    $minX=[double]::PositiveInfinity; $minY=[double]::PositiveInfinity
+    $maxX=[double]::NegativeInfinity; $maxY=[double]::NegativeInfinity
+    $valid=0
+    $xs=@([double]$b.X,[double]($b.X+$b.SizeX))
+    $ys=@([double]$b.Y,[double]($b.Y+$b.SizeY))
+    $zs=@([double]$b.Z,[double]($b.Z+$b.SizeZ))
+    foreach($x in $xs){foreach($y in $ys){foreach($z in $zs){
+        $p=[Windows.Media.Media3D.Point3D]::new($x,$y,$z)
+        $p=$matrix.Transform($p)
+        $depth=[double]$p.Y+[double]$script:CameraDistance
+        if($depth -le 0.001){continue}
+        $sx=($vw/2.0)+(($p.X/($depth*$tanH))*($vw/2.0))
+        $sy=($vh/2.0)-(($p.Z/($depth*$tanV))*($vh/2.0))
+        if([double]::IsNaN($sx) -or [double]::IsNaN($sy)){continue}
+        if($sx -lt $minX){$minX=$sx}; if($sx -gt $maxX){$maxX=$sx}
+        if($sy -lt $minY){$minY=$sy}; if($sy -gt $maxY){$maxY=$sy}
+        $valid++
+    }}}
+    if($valid -eq 0){return $null}
+    [pscustomobject]@{Left=$minX;Top=$minY;Right=$maxX;Bottom=$maxY}
+}
 
-    # A caixa acompanha a proporção real da peça na visão atual.
-    # X é largura na tela; Z é altura. Y passa a influenciar quando a peça gira.
-    $yawRad=[Math]::Abs($script:Yaw) * [Math]::PI / 180.0
-    $pitchRad=[Math]::Abs($script:Pitch) * [Math]::PI / 180.0
-    $rollRad=[Math]::Abs($script:Roll) * [Math]::PI / 180.0
-    $wUnits=([Math]::Abs([Math]::Cos($yawRad))*[double]$b.SizeX)+([Math]::Abs([Math]::Sin($yawRad))*[double]$b.SizeY)
-    $hUnits=([Math]::Abs([Math]::Cos($pitchRad))*[double]$b.SizeZ)+([Math]::Abs([Math]::Sin($pitchRad))*[double]$b.SizeY)
-    if($wUnits -lt 0.001){$wUnits=$script:ModelExtent}
-    if($hUnits -lt 0.001){$hUnits=$script:ModelExtent}
-
-    # Roll troca parte da largura/altura visual.
-    $rw=([Math]::Abs([Math]::Cos($rollRad))*$wUnits)+([Math]::Abs([Math]::Sin($rollRad))*$hUnits)
-    $rh=([Math]::Abs([Math]::Cos($rollRad))*$hUnits)+([Math]::Abs([Math]::Sin($rollRad))*$wUnits)
-
-    $ratio=$rw/[Math]::Max(0.001,$rh)
-    $maxW=$vw*0.78
-    $maxH=$vh*0.80
-    $boxH=$maxH
-    $boxW=$boxH*$ratio
-    if($boxW -gt $maxW){$boxW=$maxW;$boxH=$boxW/[Math]::Max(0.001,$ratio)}
-
-    # Folga pequena, como a caixa delimitadora do Photoshop.
-    $boxW=[Math]::Max(110.0,$boxW*1.08*$script:ModelScale)
-    $boxH=[Math]::Max(110.0,$boxH*1.08*$script:ModelScale)
-    $transformBox.Width=$boxW
-    $transformBox.Height=$boxH
-    $tx=New-Object Windows.Media.TranslateTransform $script:TransformScreenX,$script:TransformScreenY
-    $transformBox.RenderTransform=$tx
+function Update-TransformBoxVisual {
+    if($null -eq $transformBox -or -not $script:TransformBoxEnabled){return}
+    $pb=Get-ProjectedModelBounds
+    if($null -eq $pb){return}
+    $vw=[double]$viewHost.ActualWidth; $vh=[double]$viewHost.ActualHeight
+    $pad=10.0
+    $left=[Math]::Max(5.0,[double]$pb.Left-$pad)
+    $top=[Math]::Max(5.0,[double]$pb.Top-$pad)
+    $right=[Math]::Min($vw-5.0,[double]$pb.Right+$pad)
+    $bottom=[Math]::Min($vh-5.0,[double]$pb.Bottom+$pad)
+    $w=[Math]::Max(36.0,$right-$left); $h=[Math]::Max(36.0,$bottom-$top)
+    $centerX=($left+$right)/2.0; $centerY=($top+$bottom)/2.0
+    $transformBox.Width=$w
+    $transformBox.Height=$h
+    $transformBox.RenderTransform=[Windows.Media.TranslateTransform]::new($centerX-($vw/2.0),$centerY-($vh/2.0))
 }
 
 function Set-TransformBox([bool]$show) {
@@ -1684,33 +1698,77 @@ function Install-ReleaseUpdate($release) {
     } finally { Set-Loading $false }
 }
 
-function Check-ForUpdates {
-    $btnUpdate.IsEnabled=$false
-    $oldContent=[string]$btnUpdate.Content
-    $btnUpdate.Content='VERIFICANDO...'
+function Set-UpdateArrowFromRelease($release) {
+    if($null -eq $btnUpdate){return}
     try {
-        $release=Get-LatestRelease
+        if($null -eq $release){$script:PendingUpdateRelease=$null;$btnUpdate.Visibility='Collapsed';return}
         $latest=Convert-AppVersion ([string]$release.tag_name)
         $current=Convert-AppVersion $script:AppVersion
         if($latest -gt $current){
             $script:PendingUpdateRelease=$release
-            $btnUpdate.Content="ATUALIZAR $($release.tag_name)"
-            $body=[string]$release.body
-            if($body.Length -gt 900){$body=$body.Substring(0,900)+'...'}
-            $msg="Nova versão disponível: $($release.tag_name)`nVersão instalada: v$($script:AppVersion)"
-            if(-not [string]::IsNullOrWhiteSpace($body)){$msg+="`n`n$body"}
-            $ans=[Windows.MessageBox]::Show($msg+"`n`nBaixar e instalar agora?",'Atualização MT Pack Organizer','YesNo','Information')
-            if($ans -eq 'Yes'){Install-ReleaseUpdate $release}
+            $btnUpdate.ToolTip="Atualização $($release.tag_name) disponível"
+            $btnUpdate.Visibility='Visible'
         } else {
             $script:PendingUpdateRelease=$null
-            $btnUpdate.Content='ATUALIZADO'
-            [Windows.MessageBox]::Show("Você já está na versão mais recente.`n`nVersão instalada: v$($script:AppVersion)",'MT Pack Organizer') | Out-Null
+            $btnUpdate.Visibility='Collapsed'
         }
     } catch {
-        Write-AppLog ('Update check: '+$_.Exception.ToString())
-        $btnUpdate.Content=$oldContent
-        Show-Error ("Não consegui verificar atualizações.`n`n"+$_.Exception.Message)
-    } finally { $btnUpdate.IsEnabled=$true }
+        $script:PendingUpdateRelease=$null
+        $btnUpdate.Visibility='Collapsed'
+        Write-AppLog ('Update result: '+$_.Exception.Message)
+    }
+}
+
+function Start-SilentUpdateCheck {
+    try {
+        if($script:UpdateJob){return}
+        $repo=[string]$script:UpdateRepo
+        $script:UpdateJob=Start-Job -ArgumentList $repo -ScriptBlock {
+            param($repo)
+            [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+            $uri="https://api.github.com/repos/$repo/releases/latest"
+            $headers=@{'User-Agent'='MT-Pack-Organizer';'Accept'='application/vnd.github+json'}
+            Invoke-RestMethod -Uri $uri -Headers $headers -Method Get -TimeoutSec 10
+        }
+        $script:UpdateTimer=New-Object Windows.Threading.DispatcherTimer
+        $script:UpdateTimer.Interval=[TimeSpan]::FromMilliseconds(500)
+        $script:UpdateTimer.Add_Tick({
+            try {
+                if($null -eq $script:UpdateJob){$script:UpdateTimer.Stop();return}
+                $state=[string]$script:UpdateJob.State
+                if($state -eq 'Completed'){
+                    $release=Receive-Job $script:UpdateJob -ErrorAction SilentlyContinue | Select-Object -First 1
+                    Remove-Job $script:UpdateJob -Force -ErrorAction SilentlyContinue
+                    $script:UpdateJob=$null
+                    $script:UpdateTimer.Stop()
+                    Set-UpdateArrowFromRelease $release
+                } elseif($state -eq 'Failed' -or $state -eq 'Stopped'){
+                    Remove-Job $script:UpdateJob -Force -ErrorAction SilentlyContinue
+                    $script:UpdateJob=$null
+                    $script:UpdateTimer.Stop()
+                    $btnUpdate.Visibility='Collapsed'
+                }
+            } catch {
+                try{$script:UpdateTimer.Stop()}catch{}
+                $btnUpdate.Visibility='Collapsed'
+                Write-AppLog ('Silent update check: '+$_.Exception.Message)
+            }
+        })
+        $script:UpdateTimer.Start()
+    } catch {
+        $btnUpdate.Visibility='Collapsed'
+        Write-AppLog ('Silent update startup: '+$_.Exception.Message)
+    }
+}
+
+function Confirm-And-InstallUpdate {
+    $release=$script:PendingUpdateRelease
+    if($null -eq $release){$btnUpdate.Visibility='Collapsed';return}
+    $tag=[string]$release.tag_name
+    $nl=[Environment]::NewLine
+    $msg="A atualização $tag está disponível."+$nl+$nl+"Deseja atualizar agora?"+$nl+$nl+"O MT Pack Organizer será fechado e abrirá novamente já atualizado."
+    $ans=[Windows.MessageBox]::Show($msg,'Atualização disponível','YesNo','Information')
+    if($ans -eq 'Yes'){Install-ReleaseUpdate $release}
 }
 
 function Open-Pack {
@@ -2230,7 +2288,7 @@ $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="MT Studio • Pack Organizer 0.9.8"
+        Title="MT Studio • Pack Organizer 0.9.9"
         Width="1480" Height="900" MinWidth="1220" MinHeight="740"
         WindowStartupLocation="CenterScreen" Background="#000000" Foreground="#FFFFFF" WindowStyle="None" ResizeMode="CanResize">
 <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/></shell:WindowChrome.WindowChrome>
@@ -2303,9 +2361,9 @@ $xamlText = @'
 
     <Border Name="topHeader" Grid.Row="1" Background="#080809" BorderBrush="#19171D" BorderThickness="0,0,0,1">
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Border Width="132" Height="68" Background="Transparent" Margin="0,0,22,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="126" Height="64" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.8" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="ATUALIZAÇÕES" Width="112" Height="42" Margin="0,0,7,0" FontSize="9"/><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
+            <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.9" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓" Width="42" Height="42" Margin="0,0,7,0" FontSize="21" FontWeight="Bold" Visibility="Collapsed" Background="#1C1024" BorderBrush="#8F45BD" Foreground="#E7C5FF" ToolTip="Atualização disponível"/><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
     </Border>
@@ -2337,20 +2395,20 @@ $xamlText = @'
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
-                <Border BorderBrush="#A65DDB" BorderThickness="1.4" CornerRadius="2" Opacity="0.95"/>
-                <Ellipse Name="rotNW" Width="12" Height="12" Fill="#C987F3" Stroke="#F4DEFF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0" Cursor="Hand" ToolTip="Rotacionar livre"/>
-                <Ellipse Name="rotNE" Width="12" Height="12" Fill="#C987F3" Stroke="#F4DEFF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0" Cursor="Hand" ToolTip="Rotacionar livre"/>
-                <Ellipse Name="rotSW" Width="12" Height="12" Fill="#C987F3" Stroke="#F4DEFF" StrokeThickness="1.5" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6" Cursor="Hand" ToolTip="Rotacionar livre"/>
-                <Ellipse Name="rotSE" Width="12" Height="12" Fill="#C987F3" Stroke="#F4DEFF" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6" Cursor="Hand" ToolTip="Rotacionar livre"/>
-                <Rectangle Name="rotTop" Width="42" Height="7" RadiusX="3.5" RadiusY="3.5" Fill="#D49AF7" Stroke="#F2D8FF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-4,0,0" Cursor="Hand" ToolTip="Rotacionar no eixo X"/>
-                <Rectangle Name="rotBottom" Width="42" Height="7" RadiusX="3.5" RadiusY="3.5" Fill="#D49AF7" Stroke="#F2D8FF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-4" Cursor="Hand" ToolTip="Rotacionar no eixo X"/>
-                <Rectangle Name="rotLeft" Width="7" Height="42" RadiusX="3.5" RadiusY="3.5" Fill="#D49AF7" Stroke="#F2D8FF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-4,0,0,0" Cursor="Hand" ToolTip="Rotacionar no eixo Y"/>
-                <Rectangle Name="rotRight" Width="7" Height="42" RadiusX="3.5" RadiusY="3.5" Fill="#D49AF7" Stroke="#F2D8FF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-4,0" Cursor="Hand" ToolTip="Rotacionar no eixo Y"/>
-                <Grid Width="120" Height="120" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
-                    <Ellipse Name="gizmoRoll" Width="94" Height="94" Stroke="#9E55D1" StrokeThickness="2.5" Opacity="0.80" Cursor="Hand" ToolTip="Girar no eixo Z"/>
-                    <Ellipse Name="gizmoYaw" Width="112" Height="30" Stroke="#C27BF0" StrokeThickness="3" Opacity="0.92" Cursor="Hand" ToolTip="Girar no eixo Y"/>
-                    <Ellipse Name="gizmoPitch" Width="30" Height="112" Stroke="#C27BF0" StrokeThickness="3" Opacity="0.92" Cursor="Hand" ToolTip="Girar no eixo X"/>
-                    <Ellipse Width="12" Height="12" Fill="#E7C7FF" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Border BorderBrush="#B16BE0" BorderThickness="1.25" Opacity="0.96"/>
+                <Rectangle Name="rotNW" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0" Cursor="Hand" ToolTip="Rotacionar"/>
+                <Rectangle Name="rotNE" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0" Cursor="Hand" ToolTip="Rotacionar"/>
+                <Rectangle Name="rotSW" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6" Cursor="Hand" ToolTip="Rotacionar"/>
+                <Rectangle Name="rotSE" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6" Cursor="Hand" ToolTip="Rotacionar"/>
+                <Rectangle Name="rotTop" Width="30" Height="7" RadiusX="2" RadiusY="2" Fill="#B96FE7" Stroke="#E7C4FF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-4,0,0" Cursor="Hand" ToolTip="Girar no eixo X"/>
+                <Rectangle Name="rotBottom" Width="30" Height="7" RadiusX="2" RadiusY="2" Fill="#B96FE7" Stroke="#E7C4FF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-4" Cursor="Hand" ToolTip="Girar no eixo X"/>
+                <Rectangle Name="rotLeft" Width="7" Height="30" RadiusX="2" RadiusY="2" Fill="#B96FE7" Stroke="#E7C4FF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-4,0,0,0" Cursor="Hand" ToolTip="Girar no eixo Y"/>
+                <Rectangle Name="rotRight" Width="7" Height="30" RadiusX="2" RadiusY="2" Fill="#B96FE7" Stroke="#E7C4FF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-4,0" Cursor="Hand" ToolTip="Girar no eixo Y"/>
+                <Grid Width="116" Height="116" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
+                    <Ellipse Name="gizmoRoll" Width="88" Height="88" Stroke="#9650C8" StrokeThickness="2" Opacity="0.76" Cursor="Hand" ToolTip="Rotacionar em Z"/>
+                    <Ellipse Name="gizmoYaw" Width="108" Height="28" Stroke="#C174F0" StrokeThickness="3" Opacity="0.92" Cursor="Hand" ToolTip="Rotacionar em Y"/>
+                    <Ellipse Name="gizmoPitch" Width="28" Height="108" Stroke="#C174F0" StrokeThickness="3" Opacity="0.92" Cursor="Hand" ToolTip="Rotacionar em X"/>
+                    <Ellipse Width="13" Height="13" Fill="#DCA8FF" Stroke="#FFFFFF" StrokeThickness="1.2" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
             <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Text="Clique na peça para selecionar • extremidades roxas = rotação por eixo • Shift = encaixe 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
@@ -2417,9 +2475,11 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.8'
+$script:AppVersion = '0.9.9'
 $script:UpdateRepo = '0ladymt/mt-pack-organizer-releases'
 $script:PendingUpdateRelease = $null
+$script:UpdateJob = $null
+$script:UpdateTimer = $null
 $script:ThumbQueue = @()
 $script:ThumbQueueIndex = 0
 $script:SelectedCategoryFilter='all'
@@ -2471,7 +2531,7 @@ public static class MtNativeWindow {
 } catch { Write-AppLog ('Logo/assets: '+$_.Exception.Message) }
 
 $btnOpen.Add_Click({ Invoke-Safe { Open-Pack } })
-$btnUpdate.Add_Click({ Invoke-Safe { Check-ForUpdates } })
+$btnUpdate.Add_Click({ Invoke-Safe { Confirm-And-InstallUpdate } })
 $btnPrev.Add_Click({ Invoke-Safe { Navigate-Piece -1 } })
 $script:CategoryItems=@(
     [pscustomobject]@{Key='all';Display='TODAS AS CATEGORIAS'},
@@ -2549,8 +2609,8 @@ foreach($g in @($gizmoYaw,$gizmoPitch,$gizmoRoll)) {
     $g.Add_MouseLeave({param($s,$e); $s.Stroke=New-SolidBrush '#B76AE8'; $s.StrokeThickness=3})
 }
 foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE,$rotTop,$rotBottom,$rotLeft,$rotRight)) {
-    $h.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#F0D9FF'; $s.Opacity=1.0})
-    $h.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#D49AF7'; $s.Opacity=0.94})
+    $h.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#E6B8FF'; $s.Stroke=New-SolidBrush '#FFFFFF'; $s.Opacity=1.0})
+    $h.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#B96FE7'; $s.Stroke=New-SolidBrush '#E7C4FF'; $s.Opacity=0.96})
 }
 
 
@@ -2667,4 +2727,5 @@ $win.Add_KeyDown({
     }
 })
 
+Start-SilentUpdateCheck
 $win.ShowDialog() | Out-Null
