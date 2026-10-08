@@ -56,7 +56,7 @@ if($changed -eq $s){ throw 'Patch falhou em: gizmo' }
 $s=$changed
 Replace-Required "'gizmoYaw','gizmoPitch','gizmoRoll','gizmoX','gizmoZ'" "'gizmoYaw','gizmoPitch','gizmoRoll','yawHandleL','yawHandleR','pitchHandleT','pitchHandleB','rollHandleA','rollHandleB','gizmoX','gizmoZ'" 'nomes do gizmo'
 
-$viewMarker = '$viewHost.Add_MouseLeftButtonDown({'
+$dialogMarker = '$win.ShowDialog() | Out-Null'
 $endpointCode = @'
 foreach($g in @($yawHandleL,$yawHandleR)) { $g.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e}) }
 foreach($g in @($pitchHandleT,$pitchHandleB)) { $g.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e}) }
@@ -67,8 +67,8 @@ foreach($g in @($yawHandleL,$yawHandleR,$pitchHandleT,$pitchHandleB,$rollHandleA
 }
 
 '@
-if(-not $s.Contains($viewMarker)){ throw 'Patch falhou em: viewHost marker' }
-$s=$s.Replace($viewMarker,$endpointCode + $viewMarker)
+if(-not $s.Contains($dialogMarker)){ throw 'Patch falhou em: dialog marker' }
+$s=$s.Replace($dialogMarker,$endpointCode + $dialogMarker)
 
 $pattern = '(?s)function Start-ThumbnailQueue \{.*?\r?\n\}\r?\n\r?\nfunction Populate-Textures'
 $newQueue = @'
