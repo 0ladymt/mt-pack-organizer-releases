@@ -56,26 +56,25 @@ if($changed -eq $s){ throw 'Patch falhou em: gizmo' }
 $s=$changed
 Replace-Required "'gizmoYaw','gizmoPitch','gizmoRoll','gizmoX','gizmoZ'" "'gizmoYaw','gizmoPitch','gizmoRoll','yawHandleL','yawHandleR','pitchHandleT','pitchHandleB','rollHandleA','rollHandleB','gizmoX','gizmoZ'" 'nomes do gizmo'
 
-$newEvents = @'
-$gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e})
-$gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
-$gizmoRoll.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
+$rollHandler = "$" + "gizmoRoll.Add_MouseLeftButtonDown({param($" + "s,$" + "e) Start-TransformDrag 'ROTATE_ROLL' $" + "e})"
+$extraHandlers = @'
 foreach($g in @($yawHandleL,$yawHandleR)) { $g.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e}) }
 foreach($g in @($pitchHandleT,$pitchHandleB)) { $g.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e}) }
 foreach($g in @($rollHandleA,$rollHandleB)) { $g.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e}) }
-foreach($g in @($gizmoYaw,$gizmoPitch,$gizmoRoll)) {
-    $g.Add_MouseEnter({param($s,$e); $s.Stroke=New-SolidBrush '#E5BDFF'; $s.StrokeThickness=5})
-    $g.Add_MouseLeave({param($s,$e); $s.Stroke=New-SolidBrush '#A95FE0'; $s.StrokeThickness=3.5})
-}
+'@
+if(-not $s.Contains($rollHandler)){ throw 'Patch falhou em: handler roll' }
+$s=$s.Replace($rollHandler,$rollHandler + [Environment]::NewLine + $extraHandlers.TrimEnd())
+
+$viewMarker = "$" + "viewHost.Add_MouseLeftButtonDown({"
+$endpointHover = @'
 foreach($g in @($yawHandleL,$yawHandleR,$pitchHandleT,$pitchHandleB,$rollHandleA,$rollHandleB)) {
     $g.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#F0D6FF'; $s.Width=15; $s.Height=15})
     $g.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#DDAEFF'; $s.Width=12; $s.Height=12})
 }
+
 '@
-$eventsPattern = '(?s)\$gizmoYaw\.Add_MouseLeftButtonDown\(.*?foreach\(\$g in @\(\$gizmoYaw,\$gizmoPitch,\$gizmoRoll\)\) \{.*?\r?\n\}'
-$changed = [regex]::Replace($s,$eventsPattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $newEvents },1)
-if($changed -eq $s){ throw 'Patch falhou em: eventos de rotação' }
-$s=$changed
+if(-not $s.Contains($viewMarker)){ throw 'Patch falhou em: viewHost marker' }
+$s=$s.Replace($viewMarker,$endpointHover + $viewMarker)
 
 $pattern = '(?s)function Start-ThumbnailQueue \{.*?\r?\n\}\r?\n\r?\nfunction Populate-Textures'
 $newQueue = @'
