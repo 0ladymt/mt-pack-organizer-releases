@@ -56,12 +56,28 @@ jobs:
           New-Item -ItemType Directory -Force -Path work\assets | Out-Null
           Copy-Item -LiteralPath "src\MT_Pack_Organizer.ps1" -Destination "work\MT_Pack_Organizer.ps1" -Force
           Copy-Item -LiteralPath "src\assets\mt_logo.png" -Destination "work\assets\mt_logo.png" -Force
-          Copy-Item -LiteralPath "src\assets\mt_app_icon.ico" -Destination "work\assets\mt_app_icon.ico" -Force
+          Copy-Item -LiteralPath "src\assets\mt_butterfly_icon.png" -Destination "work\assets\mt_butterfly_icon.png" -Force
 
           $src = Get-Content -Raw -LiteralPath "work\MT_Pack_Organizer.ps1"
           if ($src -notmatch [regex]::Escape($env:TARGET)) { throw "A versão $env:TARGET não apareceu na fonte." }
           if (-not (Test-Path "work\assets\mt_logo.png")) { throw "Logo oficial da MT Studio não encontrada." }
-          if (-not (Test-Path "work\assets\mt_app_icon.ico")) { throw "Ícone oficial da borboleta não encontrado." }
+          if (-not (Test-Path "work\assets\mt_butterfly_icon.png")) { throw "Ícone oficial da borboleta não encontrado." }
+
+      - name: Gerar ICO da borboleta oficial
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $png = [System.Drawing.Bitmap]::FromFile((Resolve-Path "work\assets\mt_butterfly_icon.png"))
+          $hIcon = $png.GetHicon()
+          $ico = [System.Drawing.Icon]::FromHandle($hIcon)
+          $dest = Join-Path (Resolve-Path "work\assets").Path "mt_app_icon.ico"
+          $fs = [System.IO.File]::Open($dest,[System.IO.FileMode]::Create)
+          $ico.Save($fs)
+          $fs.Dispose()
+          $ico.Dispose()
+          $png.Dispose()
+          if (-not (Test-Path $dest)) { throw "Falha ao gerar mt_app_icon.ico." }
 
       - name: Preparar ferramentas Go
         if: steps.existing.outputs.exists != 'true'
