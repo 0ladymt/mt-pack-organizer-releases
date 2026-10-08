@@ -25,10 +25,10 @@ jobs:
         id: meta
         shell: pwsh
         run: |
-          $src = Get-Content -Raw -LiteralPath "src\MT_Pack_Organizer.ps1"
-          $m = [regex]::Match($src, "\$script:AppVersion\s*=\s*'([^']+)'")
-          if (-not $m.Success) { throw "AppVersion não encontrada em src/MT_Pack_Organizer.ps1." }
-          $target = $m.Groups[1].Value
+          $line = Get-Content -LiteralPath "src\MT_Pack_Organizer.ps1" | Where-Object { $_ -like '$script:AppVersion*' } | Select-Object -First 1
+          if (-not $line) { throw "AppVersion não encontrada em src/MT_Pack_Organizer.ps1." }
+          $target = ($line -split "'")[1]
+          if (-not $target) { throw "Não consegui ler AppVersion na fonte." }
           "target=$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "target_tag=v$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
