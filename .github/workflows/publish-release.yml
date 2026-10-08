@@ -56,94 +56,29 @@ jobs:
           New-Item -ItemType Directory -Force -Path work\assets | Out-Null
           Copy-Item -LiteralPath "src\MT_Pack_Organizer.ps1" -Destination "work\MT_Pack_Organizer.ps1" -Force
           Copy-Item -LiteralPath "src\assets\mt_logo.png" -Destination "work\assets\mt_logo.png" -Force
-          Copy-Item -LiteralPath "src\assets\mt_app_icon.ico" -Destination "work\assets\mt_app_icon.ico" -Force
+          Copy-Item -LiteralPath "src\assets\mt_butterfly_icon.png" -Destination "work\assets\mt_butterfly_icon.png" -Force
 
           $src = Get-Content -Raw -LiteralPath "work\MT_Pack_Organizer.ps1"
           if ($src -notmatch [regex]::Escape($env:TARGET)) { throw "A versão $env:TARGET não apareceu na fonte." }
-          if (-not (Test-Path "work\assets\mt_logo.png")) { throw "Logo não encontrada." }
-          if (-not (Test-Path "work\assets\mt_app_icon.ico")) { throw "Ícone borboleta não encontrado." }
+          if (-not (Test-Path "work\assets\mt_logo.png")) { throw "Logo oficial da MT Studio não encontrada." }
+          if (-not (Test-Path "work\assets\mt_butterfly_icon.png")) { throw "Borboleta oficial não encontrada." }
 
-      - name: Recuperar logo oficial da 0.9.5
-        if: steps.existing.outputs.exists != 'true'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          New-Item -ItemType Directory -Force -Path brand095 | Out-Null
-          gh release download v0.9.5 --repo $env:GITHUB_REPOSITORY --pattern "MT_Pack_Organizer_Setup_0.9.5.exe" --dir brand095
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "0.9.5 indisponível; mantendo a logo da fonte."
-            exit 0
-          }
-
-          $proc = Start-Process -FilePath (Resolve-Path "brand095\MT_Pack_Organizer_Setup_0.9.5.exe") -PassThru
-          $runtime095 = Join-Path $env:LOCALAPPDATA "MT Studio\Pack Organizer\runtime\0.9.5"
-          $logo095 = Join-Path $runtime095 "assets\mt_logo.png"
-          $deadline = (Get-Date).AddSeconds(45)
-
-          while (-not (Test-Path -LiteralPath $logo095) -and (Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 500
-          }
-          if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
-
-          if (Test-Path -LiteralPath $logo095) {
-            Copy-Item -LiteralPath $logo095 -Destination "work\assets\mt_logo.png" -Force
-            Write-Host "Logo oficial da 0.9.5 aplicada."
-          } else {
-            Write-Host "Logo da 0.9.5 não extraída; mantendo a logo da fonte."
-          }
-
-      - name: Refinar identidade visual
+      - name: Gerar ícone oficial da borboleta
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
-
-          # Logo: preserva exatamente o desenho/cores e apenas melhora a integração
-          # no app (fundo transparente + arquivo maior para não serrilhar).
-          $logoPath = Resolve-Path "work\assets\mt_logo.png"
-          $src = [System.Drawing.Bitmap]::FromFile($logoPath)
-          $src.MakeTransparent($src.GetPixel(0,0))
-          $logo = [System.Drawing.Bitmap]::new(560,340,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-          $g = [System.Drawing.Graphics]::FromImage($logo)
-          $g.Clear([System.Drawing.Color]::Transparent)
-          $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-          $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-          $g.DrawImage($src,0,0,560,340)
-          $g.Dispose(); $src.Dispose()
-          $logo.Save($logoPath,[System.Drawing.Imaging.ImageFormat]::Png)
-          $logo.Dispose()
-
-          # Ícone: NÃO redesenha a borboleta. Usa o mesmo desenho do asset atual
-          # e só cria a moldura quadrada arredondada pedida.
-          $iconPath = Resolve-Path "work\assets\mt_app_icon.ico"
-          $oldIcon = [System.Drawing.Icon]::new([string]$iconPath,256,256)
-          $bmp = [System.Drawing.Bitmap]::new(256,256,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-          $g = [System.Drawing.Graphics]::FromImage($bmp)
-          $g.Clear([System.Drawing.Color]::Transparent)
-          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-          $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-
-          $path = [System.Drawing.Drawing2D.GraphicsPath]::new()
-          $r=44; $x=8; $y=8; $w=240; $h=240; $d=$r*2
-          $path.AddArc($x,$y,$d,$d,180,90)
-          $path.AddArc($x+$w-$d,$y,$d,$d,270,90)
-          $path.AddArc($x+$w-$d,$y+$h-$d,$d,$d,0,90)
-          $path.AddArc($x,$y+$h-$d,$d,$d,90,90)
-          $path.CloseFigure()
-          $brush = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255,13,13,16))
-          $pen = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(255,163,32,255),6)
-          $g.FillPath($brush,$path)
-          $g.DrawPath($pen,$path)
-          $g.DrawIcon($oldIcon,([System.Drawing.Rectangle]::new(46,46,164,164)))
-          $brush.Dispose(); $pen.Dispose(); $path.Dispose(); $oldIcon.Dispose(); $g.Dispose()
-
+          $pngPath = Resolve-Path "work\assets\mt_butterfly_icon.png"
+          $icoPath = Join-Path (Resolve-Path "work\assets").Path "mt_app_icon.ico"
+          $bmp = [System.Drawing.Bitmap]::FromFile($pngPath)
           $hIcon = $bmp.GetHicon()
-          $newIcon = [System.Drawing.Icon]::FromHandle($hIcon)
-          $fs = [System.IO.File]::Open($iconPath,[System.IO.FileMode]::Create)
-          $newIcon.Save($fs)
-          $fs.Dispose(); $newIcon.Dispose(); $bmp.Dispose()
+          $icon = [System.Drawing.Icon]::FromHandle($hIcon)
+          $fs = [System.IO.File]::Open($icoPath,[System.IO.FileMode]::Create)
+          $icon.Save($fs)
+          $fs.Dispose()
+          $icon.Dispose()
+          $bmp.Dispose()
+          if (-not (Test-Path $icoPath)) { throw "Falha ao gerar o ícone oficial da borboleta." }
 
       - name: Preparar ferramentas Go
         if: steps.existing.outputs.exists != 'true'
