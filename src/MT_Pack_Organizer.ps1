@@ -2130,7 +2130,49 @@ public static class MtAddonYmtBuilder
     }
 }
 '@
-    Add-Type -TypeDefinition $builderCs -Language CSharp -ReferencedAssemblies $refs -IgnoreWarnings
+    # Add-Type + netstandard facade e instavel no Windows PowerShell 5.1.
+    # Compilamos o bridge com o csc do proprio .NET Framework e carregamos a DLL.
+    $cscCandidates=@(
+      (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
+      (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
+    )
+    $csc=$cscCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if(-not $csc){throw 'Compilador C# do .NET Framework nao encontrado (csc.exe).'}
+
+    $bridgeDir=Join-Path ([IO.Path]::GetTempPath()) 'MTStudioPackOrganizer\ymt_bridge'
+    New-Item -ItemType Directory -Force -Path $bridgeDir | Out-Null
+    $srcPath=Join-Path $bridgeDir 'MtAddonYmtBuilder.cs'
+    $dllPath=Join-Path $bridgeDir 'MtAddonYmtBuilder.dll'
+    [IO.File]::WriteAllText($srcPath,$builderCs,(New-Object Text.UTF8Encoding($false)))
+    if(Test-Path -LiteralPath $dllPath){Remove-Item -LiteralPath $dllPath -Force -ErrorAction SilentlyContinue}
+
+    $cscArgs=@(
+      '/nologo',
+      '/target:library',
+      '/optimize+',
+      ('/out:"{0}"' -f $dllPath),
+      ('/reference:"{0}"' -f $cw),
+      ('/reference:"{0}"' -f $sdx),
+      ('/reference:"{0}"' -f $sdxm),
+      ('/reference:"{0}"' -f $netstd),
+      ('"{0}"' -f $srcPath)
+    )
+    $psi=New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName=$csc
+    $psi.Arguments=($cscArgs -join ' ')
+    $psi.UseShellExecute=$false
+    $psi.CreateNoWindow=$true
+    $psi.RedirectStandardOutput=$true
+    $psi.RedirectStandardError=$true
+    $proc=[Diagnostics.Process]::Start($psi)
+    $stdout=$proc.StandardOutput.ReadToEnd()
+    $stderr=$proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    if($proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $dllPath)){
+        throw ('Falha ao compilar o gerador YMT.'+[Environment]::NewLine+$stdout+[Environment]::NewLine+$stderr)
+    }
+    [Reflection.Assembly]::LoadFrom($dllPath) | Out-Null
+    if(-not ('MtAddonYmtBuilder' -as [type])){throw 'O gerador YMT foi compilado, mas nao pode ser carregado.'}
 }
 
 function Write-ShopMeta([string]$root,[string]$project,[string]$sex) {
@@ -2385,7 +2427,7 @@ $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="MT Studio • Pack Organizer 0.9.14"
+        Title="MT Studio • Pack Organizer 0.9.15"
         Width="1480" Height="900" MinWidth="1220" MinHeight="740"
         WindowStartupLocation="CenterScreen" Background="#000000" Foreground="#FFFFFF" WindowStyle="None" ResizeMode="CanResize">
 <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/></shell:WindowChrome.WindowChrome>
@@ -2459,7 +2501,7 @@ $xamlText = @'
     <Border Name="topHeader" Grid.Row="1" Background="#080809" BorderBrush="#19171D" BorderThickness="0,0,0,1">
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.14" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.15" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓" Width="28" Height="42" Margin="0,0,7,0" Padding="0" FontSize="24" FontWeight="Bold" Visibility="Collapsed" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" Foreground="#B52BFF" ToolTip="Atualização disponível">
     <Button.Template><ControlTemplate TargetType="Button"><Grid Background="Transparent"><TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" FontWeight="{TemplateBinding FontWeight}" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock.Effect><DropShadowEffect Color="#A320FF" BlurRadius="7" ShadowDepth="0" Opacity="0.55"/></TextBlock.Effect></TextBlock></Grid><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="#E3A6FF"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.72"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
 </Button><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
@@ -2574,7 +2616,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.14'
+$script:AppVersion = '0.9.15'
 $script:UpdateRepo = '0ladymt/mt-pack-organizer-releases'
 $script:PendingUpdateRelease = $null
 $script:UpdateJob = $null
