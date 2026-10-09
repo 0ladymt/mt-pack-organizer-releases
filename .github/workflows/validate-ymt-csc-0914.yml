@@ -1,0 +1,12 @@
+name: Validar YMT CSC 0.9.14
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  validate-csc-0914:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compilar e executar candidato 0.9.14
+        shell: pwsh
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\tools\validate_ymt_csc_0914.ps1

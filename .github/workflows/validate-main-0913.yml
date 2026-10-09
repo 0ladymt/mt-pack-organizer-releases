@@ -1,0 +1,12 @@
+name: Validar gerador YMT 0.9.13
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Testar CodeWalker e gerar YMT real
+        shell: pwsh
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\tools\validate_ymt_0913.ps1
