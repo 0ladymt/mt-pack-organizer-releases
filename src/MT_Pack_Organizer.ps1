@@ -1910,20 +1910,56 @@ function Ensure-NugetDll([string]$id,[string]$version,[string]$dllName) {
     New-Item -ItemType Directory -Force -Path $backend | Out-Null
     $target=Join-Path $backend $dllName
     if(Test-Path $target){return $target}
+
     $pkg=Join-Path $backend ($id+'.'+$version+'.nupkg')
     $extract=Join-Path $backend ($id+'.'+$version)
+
     try {
         [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-        if(-not (Test-Path $pkg)){
-            Invoke-WebRequest -UseBasicParsing -Uri ("https://www.nuget.org/api/v2/package/$id/$version") -OutFile $pkg
+
+        # NuGet .nupkg é um ZIP. Expand-Archive do Windows PowerShell aceita apenas
+        # extensão .zip, então usamos ZipFile diretamente para não depender da extensão.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+
+        $downloadPackage = {
+            param($url,$dest)
+            $tmp=$dest+'.download'
+            if(Test-Path $tmp){Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tmp
+            if(-not (Test-Path $tmp)){throw 'O download do pacote não foi concluído.'}
+            if((Get-Item -LiteralPath $tmp).Length -lt 1024){throw 'O pacote baixado parece estar incompleto.'}
+            Move-Item -LiteralPath $tmp -Destination $dest -Force
         }
-        if(Test-Path $extract){Remove-Item -Recurse -Force $extract}
-        Expand-Archive -LiteralPath $pkg -DestinationPath $extract -Force
+
+        $url="https://www.nuget.org/api/v2/package/$id/$version"
+        if(-not (Test-Path $pkg)){
+            & $downloadPackage $url $pkg
+        }
+
+        $tryExtract = {
+            if(Test-Path $extract){Remove-Item -Recurse -Force -LiteralPath $extract}
+            New-Item -ItemType Directory -Force -Path $extract | Out-Null
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($pkg,$extract)
+        }
+
+        try {
+            & $tryExtract
+        } catch {
+            # Se ficou um .nupkg parcial/corrompido de uma tentativa anterior,
+            # baixa novamente uma vez e tenta extrair de novo.
+            Remove-Item -LiteralPath $pkg -Force -ErrorAction SilentlyContinue
+            if(Test-Path $extract){Remove-Item -Recurse -Force -LiteralPath $extract -ErrorAction SilentlyContinue}
+            & $downloadPackage $url $pkg
+            & $tryExtract
+        }
+
         $found=Get-ChildItem -LiteralPath $extract -Recurse -File -Filter $dllName | Select-Object -First 1
         if(-not $found){throw "$dllName não encontrado dentro do pacote $id."}
         Copy-Item -LiteralPath $found.FullName -Destination $target -Force
         return $target
-    } catch { throw "Não consegui preparar $id $version. Verifique a internet e tente novamente. $($_.Exception.Message)" }
+    } catch {
+        throw "Não consegui preparar $id $version. Verifique a internet e tente novamente. $($_.Exception.Message)"
+    }
 }
 
 function Ensure-AddonBuilderBackend {
@@ -2288,7 +2324,7 @@ $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="MT Studio • Pack Organizer 0.9.9"
+        Title="MT Studio • Pack Organizer 0.9.10"
         Width="1480" Height="900" MinWidth="1220" MinHeight="740"
         WindowStartupLocation="CenterScreen" Background="#000000" Foreground="#FFFFFF" WindowStyle="None" ResizeMode="CanResize">
 <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/></shell:WindowChrome.WindowChrome>
@@ -2362,7 +2398,7 @@ $xamlText = @'
     <Border Name="topHeader" Grid.Row="1" Background="#080809" BorderBrush="#19171D" BorderThickness="0,0,0,1">
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.9" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.10" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓" Width="42" Height="42" Margin="0,0,7,0" FontSize="21" FontWeight="Bold" Visibility="Collapsed" Background="#1C1024" BorderBrush="#8F45BD" Foreground="#E7C5FF" ToolTip="Atualização disponível"/><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
@@ -2475,7 +2511,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.9'
+$script:AppVersion = '0.9.10'
 $script:UpdateRepo = '0ladymt/mt-pack-organizer-releases'
 $script:PendingUpdateRelease = $null
 $script:UpdateJob = $null
