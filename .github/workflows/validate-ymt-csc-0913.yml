@@ -1,0 +1,12 @@
+name: Validar YMT CSC 0.9.13
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  validate-csc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compilar e executar gerador YMT
+        shell: pwsh
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\tools\validate_ymt_csc_0913.ps1
