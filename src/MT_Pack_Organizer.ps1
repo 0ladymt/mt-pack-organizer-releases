@@ -1976,10 +1976,19 @@ function Ensure-AddonBuilderBackend {
     $netstd=@(
       "$env:ProgramFiles(x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8\Facades\netstandard.dll",
       "$env:ProgramFiles(x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\Facades\netstandard.dll",
-      "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\Facades\netstandard.dll"
+      "$env:ProgramFiles(x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.1\Facades\netstandard.dll",
+      "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\Facades\netstandard.dll",
+      "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\Facades\netstandard.dll"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    $refs=@($cw,$sdx,$sdxm,'System.dll','System.Core.dll','System.Xml.dll','System.Xml.Linq.dll')
-    if($netstd){$refs+=$netstd}
+
+    # Alguns Windows têm .NET Framework instalado, mas não o Developer Pack/Facade
+    # netstandard.dll nos caminhos acima. CodeWalker.Core expõe tipos compilados
+    # contra netstandard 2.0; sem essa referência o Add-Type falha até em System.Object.
+    if(-not $netstd) {
+        $netstd=Ensure-NugetDll 'NETStandard.Library' '2.0.3' 'netstandard.dll'
+    }
+
+    $refs=@($cw,$sdx,$sdxm,$netstd,'System.dll','System.Core.dll','System.Xml.dll','System.Xml.Linq.dll')
 
     $builderCs=@'
 using System;
@@ -2324,7 +2333,7 @@ $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="MT Studio • Pack Organizer 0.9.10"
+        Title="MT Studio • Pack Organizer 0.9.11"
         Width="1480" Height="900" MinWidth="1220" MinHeight="740"
         WindowStartupLocation="CenterScreen" Background="#000000" Foreground="#FFFFFF" WindowStyle="None" ResizeMode="CanResize">
 <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/></shell:WindowChrome.WindowChrome>
@@ -2398,7 +2407,7 @@ $xamlText = @'
     <Border Name="topHeader" Grid.Row="1" Background="#080809" BorderBrush="#19171D" BorderThickness="0,0,0,1">
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.10" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.9.11" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓" Width="42" Height="42" Margin="0,0,7,0" FontSize="21" FontWeight="Bold" Visibility="Collapsed" Background="#1C1024" BorderBrush="#8F45BD" Foreground="#E7C5FF" ToolTip="Atualização disponível"/><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
@@ -2511,7 +2520,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.10'
+$script:AppVersion = '0.9.11'
 $script:UpdateRepo = '0ladymt/mt-pack-organizer-releases'
 $script:PendingUpdateRelease = $null
 $script:UpdateJob = $null
