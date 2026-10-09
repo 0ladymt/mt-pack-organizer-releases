@@ -2377,16 +2377,21 @@ function Build-FiveMAddon {
                     [IO.Directory]::CreateDirectory($folder) | Out-Null
                     $createdDirs[$folder]=$true
                 }
-                $prefix="${ped}_${project}^"
+                # Props usam obrigatoriamente mp_*_freemode_01_p_<dlc>^...
+                $prefix=if($p.IsProp){"${ped}_p_${project}^"}else{"${ped}_${project}^"}
                 if($p.IsProp){$outYdd="$prefix$($p.Slot)_{0:D3}.ydd" -f $p.NewNumber}
                 else{$outYdd="$prefix$($p.Slot)_{0:D3}_$($p.Variant).ydd" -f $p.NewNumber}
                 [IO.File]::Copy($p.Ydd.FullName,(Join-Path $folder $outYdd),$true)
 
-                foreach($v in @($p.Textures)) {
-                    $letter=$v.Letter.ToLowerInvariant()
+                # O YMT usa índices 0..N-1. Sempre renumera as texturas restantes a,b,c...
+                # para não deixar buracos após exclusões (ex.: a,c,d).
+                $texIndex=0
+                foreach($v in @($p.Textures | Sort-Object Letter)) {
+                    $letter=[char]([int][char]'a' + $texIndex)
                     if($p.IsProp){$outYtd="$prefix$($p.Slot)_diff_{0:D3}_${letter}.ytd" -f $p.NewNumber}
                     else{$outYtd="$prefix$($p.Slot)_diff_{0:D3}_${letter}_$($p.TextureKind).ytd" -f $p.NewNumber}
                     [IO.File]::Copy($v.File.FullName,(Join-Path $folder $outYtd),$true)
+                    $texIndex++
                 }
             }
 
@@ -2407,6 +2412,31 @@ function Build-FiveMAddon {
     }
 
     Write-FxManifest $outRoot @($metaFiles) @($altFiles)
+
+    # Confere os nomes que o FiveM realmente vai resolver antes de concluir.
+    $validationErrors=New-Object 'System.Collections.Generic.List[string]'
+    foreach($p in @($prepared)) {
+        $project='{0}_{1:D2}' -f $base,$p.DlcIndex
+        $ped=if($p.Sex -eq 'male'){'mp_m_freemode_01'}else{'mp_f_freemode_01'}
+        $gender=if($p.Sex -eq 'male'){'[male]'}else{'[female]'}
+        $folder=Join-Path (Join-Path $stream $gender) $p.Slot
+        $prefix=if($p.IsProp){"${ped}_p_${project}^"}else{"${ped}_${project}^"}
+
+        if($p.IsProp){$yddName="$prefix$($p.Slot)_{0:D3}.ydd" -f $p.NewNumber}
+        else{$yddName="$prefix$($p.Slot)_{0:D3}_$($p.Variant).ydd" -f $p.NewNumber}
+        if(-not (Test-Path -LiteralPath (Join-Path $folder $yddName))){$validationErrors.Add("YDD ausente: $yddName")}
+
+        for($ti=0;$ti -lt @($p.Textures).Count;$ti++){
+            $letter=[char]([int][char]'a' + $ti)
+            if($p.IsProp){$ytdName="$prefix$($p.Slot)_diff_{0:D3}_${letter}.ytd" -f $p.NewNumber}
+            else{$ytdName="$prefix$($p.Slot)_diff_{0:D3}_${letter}_$($p.TextureKind).ytd" -f $p.NewNumber}
+            if(-not (Test-Path -LiteralPath (Join-Path $folder $ytdName))){$validationErrors.Add("YTD ausente: $ytdName")}
+        }
+    }
+    if($validationErrors.Count -gt 0){
+        $msg="Validação do add-on falhou:" + [Environment]::NewLine + (($validationErrors | Select-Object -First 25) -join [Environment]::NewLine)
+        throw $msg
+    }
 
     $categoryLines=@()
     foreach($cg in @($prepared | Group-Object Sex,Slot | Sort-Object Name)){
@@ -2672,7 +2702,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.22'
+$script:AppVersion = '0.9.23'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
