@@ -2165,12 +2165,16 @@ public static class MtAddonYmtBuilder
     $csc=$cscCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     if(-not $csc){throw 'Compilador C# do .NET Framework nao encontrado (csc.exe).'}
 
-    $bridgeDir=Join-Path ([IO.Path]::GetTempPath()) 'MTStudioPackOrganizer\ymt_bridge'
-    New-Item -ItemType Directory -Force -Path $bridgeDir | Out-Null
+    # Nunca compilar em um DLL fixo compartilhado. Depois que uma assembly .NET e
+    # carregada, o arquivo fica bloqueado ate o processo fechar. Se outra instancia
+    # estiver aberta, recompilar em ymt_bridge\MtAddonYmtBuilder.dll gera CS0016.
+    # Cada processo usa seu proprio diretorio e seu proprio DLL.
+    $bridgeBase=Join-Path ([IO.Path]::GetTempPath()) 'MTStudioPackOrganizer\ymt_bridge'
+    $bridgeDir=Join-Path $bridgeBase ("proc_{0}_{1}" -f $PID,([guid]::NewGuid().ToString('N')))
+    [IO.Directory]::CreateDirectory($bridgeDir) | Out-Null
     $srcPath=Join-Path $bridgeDir 'MtAddonYmtBuilder.cs'
     $dllPath=Join-Path $bridgeDir 'MtAddonYmtBuilder.dll'
     [IO.File]::WriteAllText($srcPath,$builderCs,(New-Object Text.UTF8Encoding($false)))
-    if(Test-Path -LiteralPath $dllPath){Remove-Item -LiteralPath $dllPath -Force -ErrorAction SilentlyContinue}
 
     $cscArgs=@(
       '/nologo',
@@ -2612,7 +2616,7 @@ $xamlText = @'
             <Button Name="btnKeep" Content="1   MANTER" Style="{StaticResource PrimaryButton}" Height="50" Margin="0,0,0,8"/><Button Name="btnDelete" Content="2   EXCLUIR" Style="{StaticResource DangerButton}" Height="50"/><Button Name="btnUndo" Content="↶   DESFAZER ÚLTIMA" Height="38" Margin="0,8,0,0"/>
             <Separator Margin="0,14,0,12" Background="#2D2931"/><TextBlock Text="PROGRESSO" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblDone" Text="0 / 0" FontSize="18" FontWeight="Bold" Margin="0,5,0,5"/><ProgressBar Name="progress" Height="4" Minimum="0" Maximum="100" Foreground="#A320FF" Background="#242429"/><Grid Margin="0,11,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Border Background="#1C1024" CornerRadius="8" Padding="8" Margin="0,0,4,0"><StackPanel><TextBlock Name="lblKeepCount" Text="0" FontSize="17" FontWeight="Bold" Foreground="#D88BFF"/><TextBlock Text="MANTER" Foreground="#68646D" FontSize="8"/></StackPanel></Border><Border Grid.Column="1" Background="#211619" CornerRadius="8" Padding="8" Margin="4,0,0,0"><StackPanel><TextBlock Name="lblDeleteCount" Text="0" FontSize="17" FontWeight="Bold" Foreground="#FF8B9A"/><TextBlock Text="EXCLUIR" Foreground="#68646D" FontSize="8"/></StackPanel></Border></Grid>
             <Separator Margin="0,14,0,12" Background="#2D2931"/><Button Name="btnApply" Content="APLICAR EXCLUSÕES" Height="40"/><TextBlock Text="Move os arquivos para _PARA_EXCLUIR. Nada é apagado definitivamente." Foreground="#68646D" FontSize="8.5" TextWrapping="Wrap" Margin="0,6,0,0"/>
-            <Border Margin="0,15,0,0" Background="#0B0B0E" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="10" Padding="11"><StackPanel><TextBlock Text="GERAR ADD-ON FIVEM" FontWeight="Bold" FontSize="11"/><TextBlock Text="Cada add-on: no máximo 150 peças no total. r → whi • u → uni." Foreground="#8E8992" FontSize="8.5" TextWrapping="Wrap" Margin="0,6,0,9"/><TextBlock Text="NOME DO ADD-ON" Foreground="#D88BFF" FontSize="8.5" FontWeight="Bold"/><TextBox Name="txtAddonName" Text="mtstudio_pack" Margin="0,4,0,8"/><Button Name="btnBuildAddon" Content="GERAR ADD-ON" Style="{StaticResource PrimaryButton}" Height="42"/><TextBlock Name="lblBuildStatus" Text="Pronto para gerar" Foreground="#68646D" FontSize="8.5" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel></Border>
+            <Border Margin="0,15,0,0" Background="#0B0B0E" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="10" Padding="11"><StackPanel><TextBlock Text="GERAR ADD-ON FIVEM" FontWeight="Bold" FontSize="11"/><TextBlock Text="1 resource • até 150 peças por categoria em cada DLC • r → whi • u → uni." Foreground="#8E8992" FontSize="8.5" TextWrapping="Wrap" Margin="0,6,0,9"/><TextBlock Text="NOME DO ADD-ON" Foreground="#D88BFF" FontSize="8.5" FontWeight="Bold"/><TextBox Name="txtAddonName" Text="mtstudio_pack" Margin="0,4,0,8"/><Button Name="btnBuildAddon" Content="GERAR ADD-ON" Style="{StaticResource PrimaryButton}" Height="42"/><TextBlock Name="lblBuildStatus" Text="Pronto para gerar" Foreground="#68646D" FontSize="8.5" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel></Border>
         </StackPanel></ScrollViewer></Border>
     </Grid>
 
@@ -2650,11 +2654,6 @@ foreach($n in @(
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
 
-try {
-    $lblVersion.Text="v$($script:AppVersion)"
-    $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
-} catch {}
-
 $script:AddonNameSaved = $null
 $script:PackPath = $null
 $script:Pieces = @()
@@ -2673,7 +2672,11 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.21'
+$script:AppVersion = '0.9.22'
+try {
+    $lblVersion.Text="v$($script:AppVersion)"
+    $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
+} catch {}
 $script:UpdateRepo = '0ladymt/mt-pack-organizer-releases'
 $script:PendingUpdateRelease = $null
 $script:UpdateJob = $null
