@@ -2086,7 +2086,11 @@ public static class MtAddonYmtBuilder
         {
             MtAddonPiece p=propsIn[i];
             props[i].audioId=JenkHash.GenHash("none");
-            props[i].expressionMods=new ArrayOfFloats5(){f0=p.EnableHairScale?-p.HairScaleValue:0,f1=0,f2=0,f3=0,f4=0};
+            // CodeWalker.Core 1.0.3 usa ArrayOfBytes5 neste campo (a versão
+            // atual do grzyClothTool usa ArrayOfFloats5). Mantemos zero/default
+            // aqui para compatibilidade do YMT; o ocultamento de cabelo é
+            // tratado pelo meta de variações quando aplicável.
+            props[i].expressionMods=new ArrayOfBytes5();
             CPedPropTexData[] tex=new CPedPropTexData[p.TextureCount];
             for(int t=0;t<tex.Length;t++)
             {
@@ -2095,7 +2099,7 @@ public static class MtAddonYmtBuilder
             }
             props[i].texData=mb.AddItemArrayPtr(MetaName.CPedPropTexData,tex);
             props[i].renderFlags=(ePropRenderFlags)0; props[i].propFlags=0; props[i].flags=0;
-            props[i].anchorId=(byte)p.TypeNumeric; props[i].propId=(byte)p.Number; props[i].Unk_2894625425=0;
+            props[i].anchorId=(byte)p.TypeNumeric; props[i].propId=(byte)p.Number;
         }
         propInfo.aPropMetaData=mb.AddItemArrayPtr(MetaName.CPedPropMetaData,props);
         MtAddonPiece[] uniqueProps=propsIn.GroupBy(p=>p.TypeNumeric).Select(g=>g.First()).ToArray();
