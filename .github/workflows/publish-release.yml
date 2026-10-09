@@ -101,6 +101,15 @@ jobs:
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "work\MT_Pack_Organizer.ps1"
           if ($LASTEXITCODE -ne 0) { throw "O gerador YMT falhou no teste automático. A release não será publicada." }
 
+          # Guardas de estrutura: impedem voltar ao erro de criar um resource/ZIP por bloco de 150.
+          $src = Get-Content -Raw -LiteralPath "work\MT_Pack_Organizer.ps1"
+          if ($src -match 'Compress-Archive') { throw "Build inválido: compactação ZIP automática voltou ao gerador." }
+          if ($src -notmatch 'Group-Object Sex,IsProp,TypeNumeric') { throw "Build inválido: divisão por categoria/DLC ausente." }
+          if ($src -notmatch '\$newNumber=\[int\]\(\$i % \$maxPerCategory\)') { throw "Build inválido: numeração 000..149 por categoria ausente." }
+          if ($src -notmatch '\$stream=Join-Path \$outRoot ''stream''') { throw "Build inválido: resource único/stream não encontrado." }
+          if ($src -match 'Join-Path \$outRoot \$project') { throw "Build inválido: ainda cria subpasta separada por DLC." }
+          Write-Host "MT_ADDON_LAYOUT_SELFTEST_OK"
+
       - name: Preparar ferramentas Go
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
