@@ -55,34 +55,20 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path work\assets | Out-Null
           Copy-Item -LiteralPath "src\MT_Pack_Organizer.ps1" -Destination "work\MT_Pack_Organizer.ps1" -Force
-          [IO.File]::WriteAllBytes("work\assets\mt_logo.png",[Convert]::FromBase64String((Get-Content -Raw -LiteralPath "src\assets\mt_logo_0916.b64").Trim()))
-          [IO.File]::WriteAllBytes("work\assets\mt_butterfly_icon.png",[Convert]::FromBase64String((Get-Content -Raw -LiteralPath "src\assets\mt_butterfly_0916.b64").Trim()))
+          Copy-Item -LiteralPath "src\assets\mt_logo.png" -Destination "work\assets\mt_logo.png" -Force
+          Copy-Item -LiteralPath "src\assets\mt_butterfly_icon.png" -Destination "work\assets\mt_butterfly_icon.png" -Force
+          Copy-Item -LiteralPath "src\assets\mt_app_icon.ico" -Destination "work\assets\mt_app_icon.ico" -Force
 
           $src = Get-Content -Raw -LiteralPath "work\MT_Pack_Organizer.ps1"
           if ($src -notmatch [regex]::Escape($env:TARGET)) { throw "A versão $env:TARGET não apareceu na fonte." }
-          if (-not (Test-Path "work\assets\mt_logo.png")) { throw "Logo oficial da MT Studio não encontrada." }
-          if (-not (Test-Path "work\assets\mt_butterfly_icon.png")) { throw "Ícone oficial da borboleta não encontrado." }
-
-      - name: Gerar ICO oficial da borboleta
-        if: steps.existing.outputs.exists != 'true'
-        shell: pwsh
-        run: |
-          python -m pip install --disable-pip-version-check pillow
-          @'
-          from PIL import Image, ImageDraw
-          src=Image.open(r"work/assets/mt_butterfly_icon.png").convert("RGBA")
-          box=src.getbbox()
-          if box:
-              src=src.crop(box)
-          base=Image.new("RGBA",(256,256),(0,0,0,0))
-          draw=ImageDraw.Draw(base)
-          draw.rounded_rectangle((8,8,248,248),radius=44,fill=(12,10,16,255),outline=(163,32,255,255),width=5)
-          src.thumbnail((184,184),Image.Resampling.LANCZOS)
-          base.alpha_composite(src,((256-src.width)//2,(256-src.height)//2))
-          base.save(r"work/assets/mt_app_icon.ico",format="ICO",sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
-          '@ | Set-Content -LiteralPath make_icon.py -Encoding utf8
-          python make_icon.py
-          if (-not (Test-Path "work\assets\mt_app_icon.ico")) { throw "Falha ao gerar mt_app_icon.ico." }
+          foreach($asset in @(
+            "work\assets\mt_logo.png",
+            "work\assets\mt_butterfly_icon.png",
+            "work\assets\mt_app_icon.ico"
+          )){
+            if (-not (Test-Path $asset)) { throw "Asset oficial ausente: $asset" }
+            if ((Get-Item $asset).Length -lt 1000) { throw "Asset oficial inválido ou incompleto: $asset" }
+          }
 
       - name: Validar gerador YMT antes de publicar
         if: steps.existing.outputs.exists != 'true'
@@ -111,6 +97,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path build\app\payload\assets | Out-Null
           Copy-Item work\MT_Pack_Organizer.ps1 build\app\payload\MT_Pack_Organizer.ps1 -Force
           Copy-Item work\assets\mt_logo.png build\app\payload\assets\mt_logo.png -Force
+          Copy-Item work\assets\mt_butterfly_icon.png build\app\payload\assets\mt_butterfly_icon.png -Force
           Copy-Item work\assets\mt_app_icon.ico build\app\payload\assets\mt_app_icon.ico -Force
 
           $main = @"
@@ -143,6 +130,7 @@ jobs:
               runtimeDir := filepath.Join(base, "MT Studio", "Pack Organizer", "runtime", "$env:VERSION")
               _ = writeFile(runtimeDir, "payload/MT_Pack_Organizer.ps1", "MT_Pack_Organizer.ps1")
               _ = writeFile(runtimeDir, "payload/assets/mt_logo.png", filepath.Join("assets", "mt_logo.png"))
+              _ = writeFile(runtimeDir, "payload/assets/mt_butterfly_icon.png", filepath.Join("assets", "mt_butterfly_icon.png"))
               _ = writeFile(runtimeDir, "payload/assets/mt_app_icon.ico", filepath.Join("assets", "mt_app_icon.ico"))
 
               ps := filepath.Join(runtimeDir, "MT_Pack_Organizer.ps1")
