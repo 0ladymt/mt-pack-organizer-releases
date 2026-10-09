@@ -57,18 +57,34 @@ jobs:
           Copy-Item -LiteralPath "src\MT_Pack_Organizer.ps1" -Destination "work\MT_Pack_Organizer.ps1" -Force
           Copy-Item -LiteralPath "src\assets\mt_logo.png" -Destination "work\assets\mt_logo.png" -Force
           Copy-Item -LiteralPath "src\assets\mt_butterfly_icon.png" -Destination "work\assets\mt_butterfly_icon.png" -Force
-          Copy-Item -LiteralPath "src\assets\mt_app_icon.ico" -Destination "work\assets\mt_app_icon.ico" -Force
 
           $src = Get-Content -Raw -LiteralPath "work\MT_Pack_Organizer.ps1"
           if ($src -notmatch [regex]::Escape($env:TARGET)) { throw "A versão $env:TARGET não apareceu na fonte." }
           foreach($asset in @(
             "work\assets\mt_logo.png",
-            "work\assets\mt_butterfly_icon.png",
-            "work\assets\mt_app_icon.ico"
+            "work\assets\mt_butterfly_icon.png"
           )){
             if (-not (Test-Path $asset)) { throw "Asset oficial ausente: $asset" }
             if ((Get-Item $asset).Length -lt 1000) { throw "Asset oficial inválido ou incompleto: $asset" }
           }
+
+      - name: Gerar ICO válido da borboleta oficial
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $pngPath = (Resolve-Path "work\assets\mt_butterfly_icon.png").Path
+          $png = [System.Drawing.Bitmap]::FromFile($pngPath)
+          $hIcon = $png.GetHicon()
+          $ico = [System.Drawing.Icon]::FromHandle($hIcon)
+          $dest = Join-Path (Resolve-Path "work\assets").Path "mt_app_icon.ico"
+          $fs = [System.IO.File]::Open($dest,[System.IO.FileMode]::Create)
+          $ico.Save($fs)
+          $fs.Dispose()
+          $ico.Dispose()
+          $png.Dispose()
+          if (-not (Test-Path $dest)) { throw "Falha ao gerar mt_app_icon.ico." }
+          if ((Get-Item $dest).Length -lt 1000) { throw "mt_app_icon.ico foi gerado incompleto." }
 
       - name: Validar gerador YMT antes de publicar
         if: steps.existing.outputs.exists != 'true'
