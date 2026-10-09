@@ -55,8 +55,14 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path work\assets | Out-Null
           Copy-Item -LiteralPath "src\MT_Pack_Organizer.ps1" -Destination "work\MT_Pack_Organizer.ps1" -Force
-          Copy-Item -LiteralPath "src\assets\mt_logo.png" -Destination "work\assets\mt_logo.png" -Force
+          [IO.File]::WriteAllBytes("work\assets\mt_logo.png",[Convert]::FromBase64String((Get-Content -Raw -LiteralPath "src\assets\mt_logo_official_ui.b64").Trim()))
           Copy-Item -LiteralPath "src\assets\mt_butterfly_icon.png" -Destination "work\assets\mt_butterfly_icon.png" -Force
+
+          # Valida a logo como imagem de verdade antes de publicar.
+          Add-Type -AssemblyName System.Drawing
+          $logoCheck=[System.Drawing.Image]::FromFile((Resolve-Path "work\assets\mt_logo.png").Path)
+          if($logoCheck.Width -lt 250 -or $logoCheck.Height -lt 100){$logoCheck.Dispose();throw "Logo MT Studio inválida."}
+          $logoCheck.Dispose()
 
           $src = Get-Content -Raw -LiteralPath "work\MT_Pack_Organizer.ps1"
           if ($src -notmatch [regex]::Escape($env:TARGET)) { throw "A versão $env:TARGET não apareceu na fonte." }
