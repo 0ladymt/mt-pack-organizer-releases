@@ -1,9 +1,10 @@
-MT Pack Organizer 0.9.16
+MT Pack Organizer 0.9.17
 
-Correções principais:
-- gerador de add-on revisado para a API exata do CodeWalker.Core 1.0.3;
-- teste automático agora executa o gerador YMT antes de qualquer release ser publicada;
-- logo oficial da MT Studio restaurada no aplicativo;
-- ícone oficial da borboleta aplicado ao aplicativo, barra de tarefas e instalador;
-- seta de atualização mantida como ícone roxo simples, sem caixa;
-- preservadas as correções de exclusão, categorias, texturas e geração de packs.
+Correções:
+- geração de ADD-ON/YMT mantida com o backend validado automaticamente antes da publicação;
+- removido o caminho que recriava logo e borboleta por Base64 e podia gerar arquivos de imagem inválidos;
+- logo oficial da MT Studio passa a ser empacotada diretamente;
+- borboleta oficial passa a ser empacotada diretamente e usada no ícone/runtime;
+- ícone do aplicativo e do instalador usa o ICO oficial já validado;
+- seta de atualização continua roxa, simples e sem quadrado;
+- decisões já salvas do pack continuam preservadas.
