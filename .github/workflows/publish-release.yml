@@ -106,8 +106,8 @@ jobs:
           if ($src -match 'Compress-Archive') { throw "Build inválido: compactação ZIP automática voltou ao gerador." }
           if ($src -match "Join-Path \(\[IO\.Path\]::GetTempPath\(\)\) 'MTStudioPackOrganizer\\ymt_bridge'\s*\r?\n\s*New-Item") { throw "Build inválido: bridge YMT voltou a usar DLL fixa compartilhada." }
           if ($src -notmatch 'proc_\{0\}_\{1\}') { throw "Build inválido: bridge YMT não usa diretório exclusivo por processo." }
-          if ($src -notmatch '\$prefix=if\(\$p\.IsProp\)\{"\$\{ped\}_p_\$\{project\}\^"\}') { throw "Build inválido: prefixo _p dos props ausente." }
-          if ($src -notmatch "\$letter=\[char\]\(\[int\]\[char\]'a' \+ \$texIndex\)") { throw "Build inválido: renumeração sequencial de texturas ausente." }
+          if (-not $src.Contains('$prefix=if($p.IsProp){"${ped}_p_${project}^"}else{"${ped}_${project}^"}')) { throw "Build inválido: prefixo _p dos props ausente." }
+          if (-not $src.Contains("$letter=[char]([int][char]'a' + $texIndex)")) { throw "Build inválido: renumeração sequencial de texturas ausente." }
           if ($src -notmatch 'Group-Object Sex,IsProp,TypeNumeric') { throw "Build inválido: divisão por categoria/DLC ausente." }
           if ($src -notmatch '\$newNumber=\[int\]\(\$i % \$maxPerCategory\)') { throw "Build inválido: numeração 000..149 por categoria ausente." }
           if ($src -notmatch '\$stream=Join-Path \$outRoot ''stream''') { throw "Build inválido: resource único/stream não encontrado." }
@@ -299,12 +299,18 @@ jobs:
           TAG: ${{ steps.meta.outputs.target_tag }}
         run: |
           $file = "build\installer\MT_Pack_Organizer_Setup_$env:VERSION.exe"
-          if (Test-Path "patches\notes.md") {
-            gh release create $env:TAG $file --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "MT Pack Organizer $env:VERSION" --notes-file "patches\notes.md"
-          } else {
-            gh release create $env:TAG $file --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "MT Pack Organizer $env:VERSION" --notes "Atualização automática do MT Pack Organizer."
+          $published=$false
+          for($attempt=1;$attempt -le 4;$attempt++) {
+            if (Test-Path "patches\notes.md") {
+              gh release create $env:TAG $file --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "MT Pack Organizer $env:VERSION" --notes-file "patches\notes.md"
+            } else {
+              gh release create $env:TAG $file --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "MT Pack Organizer $env:VERSION" --notes "Atualização automática do MT Pack Organizer."
+            }
+            if ($LASTEXITCODE -eq 0) { $published=$true; break }
+            Write-Host "Tentativa $attempt de publicar $env:TAG falhou. Aguardando antes de tentar novamente..."
+            Start-Sleep -Seconds (10 * $attempt)
           }
-          if ($LASTEXITCODE -ne 0) { throw "Falha ao publicar $env:TAG." }
+          if (-not $published) { throw "Falha ao publicar $env:TAG após 4 tentativas." }
 
       - name: Resumo
         shell: pwsh
