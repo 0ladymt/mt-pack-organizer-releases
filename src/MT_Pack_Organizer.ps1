@@ -2003,10 +2003,12 @@ function Ensure-AddonBuilderBackend {
     # PCs comuns normalmente têm apenas o runtime do .NET Framework, sem o
     # "Developer Pack/Targeting Pack". Nesse caso a pasta Reference Assemblies
     # não existe, embora o programa possa rodar normalmente. Baixamos SOMENTE
-    # a facade de compilação netstandard do pacote oficial da Microsoft.
+    # a facade correta do Targeting Pack oficial do .NET Framework 4.7.1.
+    # NÃO usamos NETStandard.Library aqui: aquela DLL é um reference assembly
+    # completo e, com o csc do .NET Framework, duplica tipos de mscorlib/System.*.
     if(-not $netstd){
         try {
-            $netstd=Ensure-NugetDll 'NETStandard.Library' '2.0.3' 'netstandard.dll'
+            $netstd=Ensure-NugetDll 'Microsoft.NETFramework.ReferenceAssemblies.net471' '1.0.3' 'netstandard.dll'
         } catch {
             throw ('Não consegui preparar automaticamente a facade netstandard.dll necessária ao gerador YMT. '+$_.Exception.Message)
         }
