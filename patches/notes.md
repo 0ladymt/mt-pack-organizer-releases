@@ -1,7 +1,14 @@
-MT Pack Organizer 0.9.18
+MT Pack Organizer 0.9.20
 
-Correção:
-- corrige o erro "Não encontrei a facade netstandard.dll" em PCs sem o Developer/Targeting Pack do .NET Framework;
-- o gerador baixa automaticamente a facade oficial netstandard 2.0 quando ela não existe no Windows;
-- o teste de publicação força esse mesmo caminho de fallback para impedir uma release que funcione apenas no computador do GitHub;
-- geração YMT, branding oficial e seta roxa permanecem preservados.
+Correções principais:
+- o limite de 150 agora é POR CATEGORIA em cada DLC, não 150 peças no resource inteiro;
+- gera UM ÚNICO resource/pasta geral;
+- estrutura: stream/[female|male]/categoria;
+- os DLCs são diferenciados somente pelo sufixo _01, _02, _03... antes do ^ nos nomes;
+- cada categoria reinicia a numeração em 000 dentro de cada DLC;
+- removidas as várias pastas de add-on separadas;
+- removida a criação automática de vários ZIPs, que era a principal causa da demora;
+- cópia de YDD/YTD usa IO direto para acelerar a geração;
+- logo oficial limpa da MT Studio substitui a imagem bugada;
+- versão mostrada na interface agora acompanha a versão real do aplicativo;
+- fallback netstandard/.NET Framework e validação YMT permanecem ativos.
