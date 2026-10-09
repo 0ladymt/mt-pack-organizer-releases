@@ -107,7 +107,7 @@ jobs:
           if ($src -match "Join-Path \(\[IO\.Path\]::GetTempPath\(\)\) 'MTStudioPackOrganizer\\ymt_bridge'\s*\r?\n\s*New-Item") { throw "Build inválido: bridge YMT voltou a usar DLL fixa compartilhada." }
           if ($src -notmatch 'proc_\{0\}_\{1\}') { throw "Build inválido: bridge YMT não usa diretório exclusivo por processo." }
           if (-not $src.Contains('$prefix=if($p.IsProp){"${ped}_p_${project}^"}else{"${ped}_${project}^"}')) { throw "Build inválido: prefixo _p dos props ausente." }
-          if (-not $src.Contains("$letter=[char]([int][char]'a' + $texIndex)")) { throw "Build inválido: renumeração sequencial de texturas ausente." }
+          if (-not $src.Contains('$letter=[char]([int][char]''a'' + $texIndex)')) { throw "Build inválido: renumeração sequencial de texturas ausente." }
           if ($src -notmatch 'Group-Object Sex,IsProp,TypeNumeric') { throw "Build inválido: divisão por categoria/DLC ausente." }
           if ($src -notmatch '\$newNumber=\[int\]\(\$i % \$maxPerCategory\)') { throw "Build inválido: numeração 000..149 por categoria ausente." }
           if ($src -notmatch '\$stream=Join-Path \$outRoot ''stream''') { throw "Build inválido: resource único/stream não encontrado." }
