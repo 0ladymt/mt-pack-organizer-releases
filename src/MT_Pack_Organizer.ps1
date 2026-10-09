@@ -1988,14 +1988,32 @@ function Ensure-AddonBuilderBackend {
       (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\Facades\netstandard.dll'),
       (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\Facades\netstandard.dll')
     )
-    $netstd=$netstdCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
-    if(-not $netstd) {
-        try {
-            $ns=[Reflection.Assembly]::Load('netstandard')
-            if($ns -and $ns.Location -and (Test-Path -LiteralPath $ns.Location)){$netstd=$ns.Location}
-        } catch {}
+    $forceNugetNetstandard=($env:MT_PACK_ORGANIZER_FORCE_NUGET_NETSTANDARD -eq '1')
+    $netstd=$null
+    if(-not $forceNugetNetstandard){
+        $netstd=$netstdCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+        if(-not $netstd) {
+            try {
+                $ns=[Reflection.Assembly]::Load('netstandard')
+                if($ns -and $ns.Location -and (Test-Path -LiteralPath $ns.Location)){$netstd=$ns.Location}
+            } catch {}
+        }
     }
-    if(-not $netstd){throw 'Não encontrei a facade netstandard.dll do .NET Framework 4.7.1+ necessária ao gerador YMT.'}
+
+    # PCs comuns normalmente têm apenas o runtime do .NET Framework, sem o
+    # "Developer Pack/Targeting Pack". Nesse caso a pasta Reference Assemblies
+    # não existe, embora o programa possa rodar normalmente. Baixamos SOMENTE
+    # a facade de compilação netstandard do pacote oficial da Microsoft.
+    if(-not $netstd){
+        try {
+            $netstd=Ensure-NugetDll 'NETStandard.Library' '2.0.3' 'netstandard.dll'
+        } catch {
+            throw ('Não consegui preparar automaticamente a facade netstandard.dll necessária ao gerador YMT. '+$_.Exception.Message)
+        }
+    }
+    if(-not $netstd -or -not (Test-Path -LiteralPath $netstd)){
+        throw 'Não foi possível preparar netstandard.dll para o gerador YMT.'
+    }
 
     $refs=@($cw,$sdx,$sdxm,$netstd,'System.dll','System.Core.dll','System.Xml.dll','System.Xml.Linq.dll')
 
@@ -2622,7 +2640,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.17'
+$script:AppVersion = '0.9.18'
 $script:UpdateRepo = '0ladymt/mt-pack-organizer-releases'
 $script:PendingUpdateRelease = $null
 $script:UpdateJob = $null
