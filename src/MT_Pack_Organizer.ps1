@@ -7,7 +7,15 @@ $script:InstanceMutex=$null
 $createdNew=$false
 try {
     $script:InstanceMutex=[Threading.Mutex]::new($true,'Local\MTStudio.PackOrganizer.SingleInstance',[ref]$createdNew)
-    if(-not $createdNew){exit 0}
+    if(-not $createdNew){
+        # Se o atalho for clicado outra vez, traz a janela existente para frente.
+        try {
+            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class MtFocusWindow { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int n); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); }' -ErrorAction SilentlyContinue
+            $existing=Get-Process -Name powershell,pwsh -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like '*Pack Organizer*' -and $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
+            if($existing){[void][MtFocusWindow]::ShowWindow($existing.MainWindowHandle,9);[void][MtFocusWindow]::SetForegroundWindow($existing.MainWindowHandle)}
+        } catch {}
+        exit 0
+    }
 } catch { }
 $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Branding oficial: os assets são empacotados pelo build e nunca são recriados/reescritos em runtime.
@@ -889,8 +897,17 @@ function Remember-Project([string]$path) {
 }
 
 function Remove-RecentProject([string]$path) {
-    $ans=[Windows.MessageBox]::Show("Remover este projeto da página inicial?`n`n$path`n`nAs roupas e o progresso salvo NÃO serão apagados. Você poderá adicioná-lo novamente depois.",'Remover projeto','YesNo','Question')
+    $ans=[Windows.MessageBox]::Show("Excluir este projeto da página inicial?`n`n$path`n`nOs arquivos de roupas NÃO serão apagados. Os dados do projeto serão arquivados para recuperação.",'Excluir projeto','YesNo','Warning')
     if($ans -ne 'Yes'){return}
+    $statePath=Get-StatePathForPack $path
+    $archiveDir=Join-Path (Get-AppDataDir) 'projetos_arquivados'
+    if(-not (Test-Path -LiteralPath $archiveDir)){[void](New-Item -ItemType Directory -Path $archiveDir -Force)}
+    foreach($file in @($statePath,($statePath+'.bak'))){
+        if(Test-Path -LiteralPath $file){
+            $name=([IO.Path]::GetFileName($file))+'_'+(Get-Date -Format 'yyyyMMddHHmmssfff')
+            Move-Item -LiteralPath $file -Destination (Join-Path $archiveDir $name)
+        }
+    }
     $paths=@(Get-RecentProjectPaths | Where-Object { [string]$_ -ne $path })
     ConvertTo-Json -InputObject @($paths) | Set-Content -LiteralPath (Get-RecentProjectsPath) -Encoding UTF8
     Refresh-RecentProjects
@@ -1002,7 +1019,7 @@ function Refresh-RecentProjects {
         $actions=New-Object Windows.Controls.StackPanel;$actions.Orientation='Vertical';$actions.Margin='22,0,0,0'
         $open=New-Object Windows.Controls.Button;$open.Content='CONTINUAR  ›';$open.Width=125;$open.Height=36
         $rename=New-Object Windows.Controls.Button;$rename.Content='RENOMEAR';$rename.Width=125;$rename.Height=30;$rename.Margin='0,7,0,0'
-        $remove=New-Object Windows.Controls.Button;$remove.Content='REMOVER';$remove.Width=125;$remove.Height=30;$remove.Margin='0,7,0,0'
+        $remove=New-Object Windows.Controls.Button;$remove.Content='EXCLUIR PROJETO';$remove.Width=125;$remove.Height=30;$remove.Margin='0,7,0,0'
         $remove.Foreground=New-SolidBrush '#FF9CA4'
         $localPath=[string]$path
         $open.Add_Click({Invoke-Safe {Open-PackPath $localPath}}.GetNewClosure())
