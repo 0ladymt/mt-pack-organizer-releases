@@ -3270,6 +3270,8 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         Navigate-Piece 1
         if($script:Index -ne 1){throw 'O projeto de teste não navegou após YDD inválida.'}
         if(-not (Test-Path -LiteralPath (Get-StatePath))){throw 'O projeto de teste não salvou seu estado.'}
+        $saved=Get-Content -LiteralPath (Get-StatePath) -Raw | ConvertFrom-Json
+        if([int]$saved.index -ne 1){throw 'O projeto de teste não atualizou o índice salvo.'}
     } finally {
         $win.Close()
         if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
