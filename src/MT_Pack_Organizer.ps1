@@ -972,11 +972,11 @@ function Prompt-ProjectName([string]$current) {
     $heading=New-Object Windows.Controls.TextBlock
     $heading.Text='NOME DO PROJETO';$heading.Foreground=New-SolidBrush '#D88BFF';$heading.FontWeight='Bold';$heading.FontSize=14
     [void]$panel.Children.Add($heading)
-    $input=New-Object Windows.Controls.TextBox
-    $input.Text=$current;$input.FontSize=14;$input.Height=36;$input.Margin='0,14,0,14';$input.MaxLength=60
-    $input.Background=New-SolidBrush '#1B1720';$input.Foreground=New-SolidBrush '#FFFFFF'
-    $input.BorderBrush=New-SolidBrush '#A432DC';$input.Padding='7,5'
-    [void]$panel.Children.Add($input)
+    $projectNameInput=New-Object Windows.Controls.TextBox
+    $projectNameInput.Text=$current;$projectNameInput.FontSize=14;$projectNameInput.Height=36;$projectNameInput.Margin='0,14,0,14';$projectNameInput.MaxLength=60
+    $projectNameInput.Background=New-SolidBrush '#1B1720';$projectNameInput.Foreground=New-SolidBrush '#FFFFFF'
+    $projectNameInput.BorderBrush=New-SolidBrush '#A432DC';$projectNameInput.Padding='7,5'
+    [void]$panel.Children.Add($projectNameInput)
     $buttons=New-Object Windows.Controls.StackPanel;$buttons.Orientation='Horizontal';$buttons.HorizontalAlignment='Right'
     $cancel=New-Object Windows.Controls.Button;$cancel.Content='CANCELAR';$cancel.Width=100;$cancel.Height=34
     $confirm=New-Object Windows.Controls.Button;$confirm.Content='SALVAR';$confirm.Width=100;$confirm.Height=34;$confirm.Margin='8,0,0,0'
@@ -984,18 +984,18 @@ function Prompt-ProjectName([string]$current) {
     # Handlers WPF executam após a saída do escopo de Prompt-ProjectName.
     # GetNewClosure preserva a janela e o campo, inclusive ao clicar em SALVAR.
     $cancel.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
-    $confirm.Add_Click({if(-not [string]::IsNullOrWhiteSpace($input.Text)){$dialog.DialogResult=$true}}.GetNewClosure())
-    $input.Add_KeyDown({param($s,$e);if($e.Key -eq 'Return' -and -not [string]::IsNullOrWhiteSpace($input.Text)){$dialog.DialogResult=$true}}.GetNewClosure())
+    $confirm.Add_Click({if(-not [string]::IsNullOrWhiteSpace($projectNameInput.Text)){$dialog.DialogResult=$true}}.GetNewClosure())
+    $projectNameInput.Add_KeyDown({param($s,$e);if($e.Key -eq 'Return' -and -not [string]::IsNullOrWhiteSpace($projectNameInput.Text)){$dialog.DialogResult=$true}}.GetNewClosure())
     [void]$buttons.Children.Add($cancel);[void]$buttons.Children.Add($confirm);[void]$panel.Children.Add($buttons)
     $dialog.Content=$panel
-    $input.SelectAll();$input.Focus() | Out-Null
+    $projectNameInput.SelectAll();$projectNameInput.Focus() | Out-Null
     if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         [void]$dialog.Dispatcher.BeginInvoke([Action]{
-            $input.Text='Projeto nomeado no teste'
+            $projectNameInput.Text='Projeto nomeado no teste'
             $confirm.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
         }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
     }
-    if($dialog.ShowDialog() -eq $true){return $input.Text.Trim()}
+    if($dialog.ShowDialog() -eq $true){return $projectNameInput.Text.Trim()}
     return $null
 }
 
