@@ -10,3 +10,10 @@ MT Pack Organizer 0.9.25
 - Caixa de transformação com moldura discreta, marcadores claros, setas coloridas e anéis de rotação inspirados no Photoshop.
 - Apenas uma instância do aplicativo por vez.
 - Preserva as correções de texturas embutidas, tratamento de RSC7 e geração FiveM.
+# MT Pack Organizer 0.9.26
+
+- A iluminação agora aumenta a visibilidade de detalhes nas texturas escuras por correção de gama, mantendo o fundo 3D escuro e fixo.
+- Janela de nome de projeto corrigida: botão SALVAR e tecla Enter confirmam o nome; título simplificado e ícone oficial.
+- Caixa de transformação revista com puxadores quadrados, eixos e centro projetado estável ao girar a peça.
+- Janela do Windows informa seu aplicativo de relançamento e ícone para reduzir a associação com o PowerShell na barra de tarefas.
+
