@@ -3260,7 +3260,20 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
     # Não abre pack nem realiza atualização de produção.
     $win.Show()
     [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
-    $win.Close()
+    $fixture=Join-Path ([IO.Path]::GetTempPath()) ('MTPO_UI_TEST_'+[Guid]::NewGuid().ToString('N'))
+    try {
+        [void](New-Item -ItemType Directory -Path $fixture -Force)
+        [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_000_u.ydd'),[byte[]](1,2,3,4))
+        [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_001_u.ydd'),[byte[]](1,2,3,4))
+        Open-PackPath $fixture
+        if($script:Pieces.Count -ne 2){throw 'O projeto de teste não indexou as duas peças.'}
+        Navigate-Piece 1
+        if($script:Index -ne 1){throw 'O projeto de teste não navegou após YDD inválida.'}
+        if(-not (Test-Path -LiteralPath (Get-StatePath))){throw 'O projeto de teste não salvou seu estado.'}
+    } finally {
+        $win.Close()
+        if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
+    }
     Write-Host 'MT_PACK_ORGANIZER_UI_SELFTEST_OK'
     exit 0
 }
