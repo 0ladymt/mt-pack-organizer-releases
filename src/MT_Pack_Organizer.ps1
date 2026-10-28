@@ -3502,6 +3502,19 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         $saved=Get-Content -LiteralPath (Get-StatePath) -Raw | ConvertFrom-Json
         if([int]$saved.index -ne 1){throw 'O projeto de teste não atualizou o índice salvo.'}
         Go-Home
+        if(-not [string]::IsNullOrWhiteSpace($env:MT_PACK_ORGANIZER_SCREENSHOT)){
+            try {
+                $win.UpdateLayout()
+                $w=[int]$win.ActualWidth;$h=[int]$win.ActualHeight
+                $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap $w,$h,96,96,([Windows.Media.PixelFormats]::Pbgra32)
+                $bitmap.Render($win)
+                $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder
+                $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+                $output=[IO.File]::Create($env:MT_PACK_ORGANIZER_SCREENSHOT)
+                try{$encoder.Save($output)}finally{$output.Dispose()}
+                Write-Host 'MT_PACK_ORGANIZER_UI_PREVIEW_OK'
+            } catch {Write-Host ('Captura opcional não disponível: '+$_.Exception.Message)}
+        }
         Open-PackPath $fixture
         if($script:Index -ne 1 -or $script:Decisions.Count -ne 2){throw 'O progresso foi perdido ao reabrir o projeto.'}
         if($script:Decisions[$script:Pieces[0].FullName] -ne 'MANTER' -or $script:Decisions[$script:Pieces[1].FullName] -ne 'EXCLUIR'){
