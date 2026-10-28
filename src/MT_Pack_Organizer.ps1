@@ -926,8 +926,8 @@ function Remember-Project([string]$path) {
 }
 
 function Remove-RecentProject([string]$path) {
-    $ans=[Windows.MessageBox]::Show("Excluir este projeto da página inicial?`n`n$path`n`nOs arquivos de roupas NÃO serão apagados. Os dados do projeto serão arquivados para recuperação.",'Excluir projeto','YesNo','Warning')
-    if($ans -ne 'Yes'){return}
+    $projectInfo=Get-SavedProjectInfo $path
+    if(-not (Confirm-RemoveProject $projectInfo.Name $path)){return}
     $statePath=Get-StatePathForPack $path
     $archiveDir=Join-Path (Get-AppDataDir) 'projetos_arquivados'
     if(-not (Test-Path -LiteralPath $archiveDir)){[void](New-Item -ItemType Directory -Path $archiveDir -Force)}
@@ -940,6 +940,88 @@ function Remove-RecentProject([string]$path) {
     $paths=@(Get-RecentProjectPaths | Where-Object { [string]$_ -ne $path })
     ConvertTo-Json -InputObject @($paths) | Set-Content -LiteralPath (Get-RecentProjectsPath) -Encoding UTF8
     Refresh-RecentProjects
+}
+
+function New-ProjectModal([string]$heading,[string]$description,[int]$width=500,[int]$height=310) {
+    # Mesmo padrão de janelas em renomear, excluir e localizar pastas.
+    $dialog=New-Object Windows.Window
+    $dialog.Width=$width;$dialog.Height=$height;$dialog.MinWidth=$width
+    $dialog.WindowStyle='None';$dialog.ResizeMode='NoResize'
+    $dialog.AllowsTransparency=$true;$dialog.Background=[Windows.Media.Brushes]::Transparent
+    $dialog.ShowInTaskbar=$false;$dialog.WindowStartupLocation='CenterOwner';$dialog.Owner=$win
+    $frame=New-Object Windows.Controls.Border
+    $frame.Background=New-SolidBrush '#111116';$frame.BorderBrush=New-SolidBrush '#5B3270'
+    $frame.BorderThickness='1';$frame.CornerRadius='16';$frame.Padding='24'
+    $dialog.Content=$frame
+    $body=New-Object Windows.Controls.Grid
+    $body.RowDefinitions.Add((New-Object Windows.Controls.RowDefinition -Property @{Height=[Windows.GridLength]::Auto}))
+    $body.RowDefinitions.Add((New-Object Windows.Controls.RowDefinition -Property @{Height=[Windows.GridLength]::Auto}))
+    $body.RowDefinitions.Add((New-Object Windows.Controls.RowDefinition -Property @{Height=[Windows.GridLength]::new(1,[Windows.GridUnitType]::Star)}))
+    $body.RowDefinitions.Add((New-Object Windows.Controls.RowDefinition -Property @{Height=[Windows.GridLength]::Auto}))
+    $frame.Child=$body
+    $header=New-Object Windows.Controls.Grid
+    $header.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
+    $header.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition -Property @{Width=[Windows.GridLength]::Auto}))
+    $title=New-Object Windows.Controls.TextBlock
+    $title.Text=$heading;$title.Foreground=New-SolidBrush '#FFFFFF';$title.FontSize=21;$title.FontWeight='Bold';$title.VerticalAlignment='Center'
+    $close=New-Object Windows.Controls.Button
+    $close.Content='✕';$close.Width=32;$close.Height=32;$close.FontSize=13
+    $close.Background=New-SolidBrush '#231D28';$close.Foreground=New-SolidBrush '#C2B9C8'
+    $close.BorderBrush=New-SolidBrush '#3A3040';$close.Cursor='Hand'
+    [Windows.Controls.Grid]::SetColumn($close,1)
+    [void]$header.Children.Add($title);[void]$header.Children.Add($close)
+    [Windows.Controls.Grid]::SetRow($header,0);[void]$body.Children.Add($header)
+    $subtitle=New-Object Windows.Controls.TextBlock
+    $subtitle.Text=$description;$subtitle.FontSize=12;$subtitle.TextWrapping='Wrap'
+    $subtitle.Foreground=New-SolidBrush '#A9A0B2';$subtitle.Margin='0,9,0,18'
+    [Windows.Controls.Grid]::SetRow($subtitle,1);[void]$body.Children.Add($subtitle)
+    $content=New-Object Windows.Controls.StackPanel
+    [Windows.Controls.Grid]::SetRow($content,2);[void]$body.Children.Add($content)
+    $footer=New-Object Windows.Controls.StackPanel
+    $footer.Orientation='Horizontal';$footer.HorizontalAlignment='Right';$footer.Margin='0,18,0,0'
+    [Windows.Controls.Grid]::SetRow($footer,3);[void]$body.Children.Add($footer)
+    $close.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
+    $header.Add_MouseLeftButtonDown({param($s,$e);try{$dialog.DragMove()}catch{}}.GetNewClosure())
+    return [pscustomobject]@{Window=$dialog;Content=$content;Footer=$footer;Close=$close}
+}
+
+function New-ModalButton([string]$label,[bool]$primary=$false,[bool]$danger=$false) {
+    $button=New-Object Windows.Controls.Button
+    $button.Content=$label;$button.Width=137;$button.Height=40;$button.Margin='9,0,0,0'
+    $button.FontSize=11;$button.FontWeight='SemiBold';$button.Cursor='Hand'
+    $button.Foreground=New-SolidBrush '#FFFFFF'
+    if($danger){$button.Background=New-SolidBrush '#8A2941';$button.BorderBrush=New-SolidBrush '#C0546D'}
+    elseif($primary){$button.Background=New-SolidBrush '#A432DC';$button.BorderBrush=New-SolidBrush '#C069EE'}
+    else{$button.Background=New-SolidBrush '#28242E';$button.BorderBrush=New-SolidBrush '#45404D'}
+    return $button
+}
+
+function Confirm-RemoveProject([string]$name,[string]$path) {
+    $modal=New-ProjectModal 'Excluir projeto?' 'Esta ação remove o projeto da sua página inicial.' 535 330
+    $dialog=$modal.Window
+    $project=New-Object Windows.Controls.Border
+    $project.Background=New-SolidBrush '#1B1721';$project.BorderBrush=New-SolidBrush '#46304D'
+    $project.BorderThickness='1';$project.CornerRadius='9';$project.Padding='13'
+    $stack=New-Object Windows.Controls.StackPanel
+    $nameText=New-Object Windows.Controls.TextBlock
+    $nameText.Text=$name;$nameText.Foreground=New-SolidBrush '#FFFFFF';$nameText.FontSize=15;$nameText.FontWeight='SemiBold'
+    $pathText=New-Object Windows.Controls.TextBlock
+    $pathText.Text=$path;$pathText.Foreground=New-SolidBrush '#81798A';$pathText.FontSize=10
+    $pathText.TextTrimming='CharacterEllipsis';$pathText.Margin='0,5,0,0'
+    [void]$stack.Children.Add($nameText);[void]$stack.Children.Add($pathText);$project.Child=$stack
+    [void]$modal.Content.Children.Add($project)
+    $notice=New-Object Windows.Controls.TextBlock
+    $notice.Text='✓ Seus arquivos de roupas não serão apagados. O histórico será arquivado para recuperação.'
+    $notice.TextWrapping='Wrap';$notice.Foreground=New-SolidBrush '#C7B6D0';$notice.FontSize=11;$notice.Margin='0,16,0,0'
+    [void]$modal.Content.Children.Add($notice)
+    $cancel=New-ModalButton 'CANCELAR';$remove=New-ModalButton 'EXCLUIR PROJETO' $false $true
+    [void]$modal.Footer.Children.Add($cancel);[void]$modal.Footer.Children.Add($remove)
+    $cancel.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
+    $remove.Add_Click({$dialog.DialogResult=$true}.GetNewClosure())
+    if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
+        [void]$dialog.Dispatcher.BeginInvoke([Action]{ $cancel.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
+    }
+    return ($dialog.ShowDialog() -eq $true)
 }
 
 function Get-SavedProjectInfo([string]$path) {
@@ -962,32 +1044,23 @@ function Get-SavedProjectInfo([string]$path) {
 }
 
 function Prompt-ProjectName([string]$current) {
-    $dialog=New-Object Windows.Window
-    $dialog.Title='Nome do projeto';$dialog.Width=420;$dialog.Height=220
-    $dialog.WindowStartupLocation='CenterOwner';$dialog.Owner=$win
-    $dialog.ResizeMode='NoResize';$dialog.Background=New-SolidBrush '#101014'
-    if($win.Icon){$dialog.Icon=$win.Icon}
-    $panel=New-Object Windows.Controls.StackPanel
-    $panel.Margin='22'
+    $modal=New-ProjectModal 'Nome do projeto' 'Escolha um nome para identificar seu pack na página inicial.' 490 275
+    $dialog=$modal.Window
     $heading=New-Object Windows.Controls.TextBlock
-    $heading.Text='NOME DO PROJETO';$heading.Foreground=New-SolidBrush '#D88BFF';$heading.FontWeight='Bold';$heading.FontSize=14
-    [void]$panel.Children.Add($heading)
+    $heading.Text='IDENTIFICAÇÃO DO PROJETO';$heading.Foreground=New-SolidBrush '#D88BFF';$heading.FontWeight='Bold';$heading.FontSize=10
+    [void]$modal.Content.Children.Add($heading)
     $projectNameInput=New-Object Windows.Controls.TextBox
-    $projectNameInput.Text=$current;$projectNameInput.FontSize=14;$projectNameInput.Height=36;$projectNameInput.Margin='0,14,0,14';$projectNameInput.MaxLength=60
+    $projectNameInput.Text=$current;$projectNameInput.FontSize=14;$projectNameInput.Height=44;$projectNameInput.Margin='0,8,0,0';$projectNameInput.MaxLength=60
     $projectNameInput.Background=New-SolidBrush '#1B1720';$projectNameInput.Foreground=New-SolidBrush '#FFFFFF'
-    $projectNameInput.BorderBrush=New-SolidBrush '#A432DC';$projectNameInput.Padding='7,5'
-    [void]$panel.Children.Add($projectNameInput)
-    $buttons=New-Object Windows.Controls.StackPanel;$buttons.Orientation='Horizontal';$buttons.HorizontalAlignment='Right'
-    $cancel=New-Object Windows.Controls.Button;$cancel.Content='CANCELAR';$cancel.Width=100;$cancel.Height=34
-    $confirm=New-Object Windows.Controls.Button;$confirm.Content='SALVAR';$confirm.Width=100;$confirm.Height=34;$confirm.Margin='8,0,0,0'
-    $confirm.Background=New-SolidBrush '#A432DC';$confirm.Foreground=New-SolidBrush '#FFFFFF'
+    $projectNameInput.BorderBrush=New-SolidBrush '#A432DC';$projectNameInput.Padding='12,9'
+    [void]$modal.Content.Children.Add($projectNameInput)
+    $cancel=New-ModalButton 'CANCELAR';$confirm=New-ModalButton 'SALVAR NOME' $true
     # Handlers WPF executam após a saída do escopo de Prompt-ProjectName.
     # GetNewClosure preserva a janela e o campo, inclusive ao clicar em SALVAR.
     $cancel.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
     $confirm.Add_Click({if(-not [string]::IsNullOrWhiteSpace($projectNameInput.Text)){$dialog.DialogResult=$true}}.GetNewClosure())
     $projectNameInput.Add_KeyDown({param($s,$e);if($e.Key -eq 'Return' -and -not [string]::IsNullOrWhiteSpace($projectNameInput.Text)){$dialog.DialogResult=$true}}.GetNewClosure())
-    [void]$buttons.Children.Add($cancel);[void]$buttons.Children.Add($confirm);[void]$panel.Children.Add($buttons)
-    $dialog.Content=$panel
+    [void]$modal.Footer.Children.Add($cancel);[void]$modal.Footer.Children.Add($confirm)
     $projectNameInput.SelectAll();$projectNameInput.Focus() | Out-Null
     if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         [void]$dialog.Dispatcher.BeginInvoke([Action]{
@@ -2242,12 +2315,90 @@ function Confirm-And-InstallUpdate {
     if($ans -eq 'Yes'){Install-ReleaseUpdate $release}
 }
 
-function Open-Pack {
-    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dlg.Description = 'Selecione a pasta stream do pack'
-    if ($dlg.ShowDialog() -ne 'OK') { return }
+function Select-PackFolder {
+    $modal=New-ProjectModal 'Abrir um pack' 'Localize a pasta stream do pack ou cole o caminho da pasta abaixo.' 650 640
+    $dialog=$modal.Window
+    $state=[pscustomobject]@{Path='';Chosen=''}
+    $toolbar=New-Object Windows.Controls.StackPanel
+    $toolbar.Orientation='Horizontal';$toolbar.Margin='0,0,0,12'
+    $back=New-ModalButton '↑  VOLTAR'
+    $back.Width=115;$back.Margin='0,0,8,0'
+    $pc=New-ModalButton 'ESTE COMPUTADOR';$pc.Width=170;$pc.Margin='0'
+    [void]$toolbar.Children.Add($back);[void]$toolbar.Children.Add($pc)
+    [void]$modal.Content.Children.Add($toolbar)
+    $pathBox=New-Object Windows.Controls.TextBox
+    $pathBox.Height=39;$pathBox.FontSize=12;$pathBox.Padding='11,8'
+    $pathBox.Background=New-SolidBrush '#1C1922';$pathBox.Foreground=New-SolidBrush '#FFFFFF'
+    $pathBox.BorderBrush=New-SolidBrush '#50415D';$pathBox.Margin='0,0,0,12'
+    $pathBox.ToolTip='Digite ou cole o caminho completo de uma pasta e pressione Enter'
+    [void]$modal.Content.Children.Add($pathBox)
+    $folderList=New-Object Windows.Controls.ListBox
+    $folderList.Height=300;$folderList.DisplayMemberPath='Name';$folderList.FontSize=13
+    $folderList.Background=New-SolidBrush '#17151C';$folderList.Foreground=New-SolidBrush '#F1EAF7'
+    $folderList.BorderBrush=New-SolidBrush '#322939';$folderList.Padding='9'
+    [void]$modal.Content.Children.Add($folderList)
+    $tip=New-Object Windows.Controls.TextBlock
+    $tip.Text='Clique duas vezes para entrar em uma pasta. Clique em ABRIR ESTA PASTA para selecioná-la.'
+    $tip.Foreground=New-SolidBrush '#82798B';$tip.FontSize=10;$tip.Margin='0,11,0,0'
+    [void]$modal.Content.Children.Add($tip)
+    $cancel=New-ModalButton 'CANCELAR'
+    $select=New-ModalButton 'ABRIR ESTA PASTA' $true
+    $select.Width=174
+    [void]$modal.Footer.Children.Add($cancel);[void]$modal.Footer.Children.Add($select)
+    $refresh={
+        param([string]$newPath)
+        $folderList.Items.Clear()
+        if([string]::IsNullOrWhiteSpace($newPath)){
+            $state.Path='';$pathBox.Text='Este Computador'
+            foreach($drive in [IO.DriveInfo]::GetDrives()){
+                if($drive.IsReady){[void]$folderList.Items.Add([pscustomobject]@{Name=('💾  '+$drive.Name);FullName=$drive.RootDirectory.FullName})}
+            }
+            return
+        }
+        if(-not (Test-Path -LiteralPath $newPath -PathType Container)){return}
+        $state.Path=[IO.Path]::GetFullPath($newPath);$pathBox.Text=$state.Path
+        try {
+            $folders=@(Get-ChildItem -LiteralPath $state.Path -Directory -ErrorAction Stop | Sort-Object Name)
+            foreach($folder in $folders){[void]$folderList.Items.Add([pscustomobject]@{Name=('📁  '+$folder.Name);FullName=$folder.FullName})}
+        } catch { Write-AppLog ('Navegar pasta: '+$_.Exception.Message) }
+    }.GetNewClosure()
+    $back.Add_Click({
+        if($state.Path){$parent=[IO.Directory]::GetParent($state.Path);if($parent){& $refresh $parent.FullName}else{& $refresh ''}}
+    }.GetNewClosure())
+    $pc.Add_Click({& $refresh ''}.GetNewClosure())
+    $folderList.Add_MouseDoubleClick({
+        if($folderList.SelectedItem){& $refresh ([string]$folderList.SelectedItem.FullName)}
+    }.GetNewClosure())
+    $pathBox.Add_KeyDown({param($s,$e)
+        if($e.Key -eq 'Return'){
+            $candidate=$pathBox.Text.Trim(' ','"')
+            if(Test-Path -LiteralPath $candidate -PathType Container){& $refresh $candidate}
+            $e.Handled=$true
+        }
+    }.GetNewClosure())
+    $cancel.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
+    $select.Add_Click({
+        $candidate=$pathBox.Text.Trim(' ','"')
+        if(Test-Path -LiteralPath $candidate -PathType Container){$state.Chosen=[IO.Path]::GetFullPath($candidate);$dialog.DialogResult=$true}
+        elseif($state.Path -and (Test-Path -LiteralPath $state.Path -PathType Container)){$state.Chosen=$state.Path;$dialog.DialogResult=$true}
+    }.GetNewClosure())
+    $initial=Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
+    if($script:PackPath -and (Test-Path -LiteralPath $script:PackPath -PathType Container)){$initial=$script:PackPath}
+    if(Test-Path -LiteralPath $initial -PathType Container){& $refresh $initial}else{& $refresh ''}
+    if($env:MT_PACK_ORGANIZER_UITEST -eq '1' -and $env:MT_PACK_ORGANIZER_PICKER_TEST_PATH){
+        [void]$dialog.Dispatcher.BeginInvoke([Action]{
+            $pathBox.Text=$env:MT_PACK_ORGANIZER_PICKER_TEST_PATH
+            $select.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+        }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
+    }
+    if($dialog.ShowDialog() -eq $true){return [string]$state.Chosen}
+    return $null
+}
 
-    Open-PackPath ([string]$dlg.SelectedPath)
+function Open-Pack {
+    $selectedPath=Select-PackFolder
+    if([string]::IsNullOrWhiteSpace($selectedPath)){return}
+    Open-PackPath $selectedPath
 }
 
 function Open-PackPath([string]$selectedPath) {
@@ -3219,7 +3370,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.26'
+$script:AppVersion = '0.9.27'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3579,6 +3730,11 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         [void](New-Item -ItemType Directory -Path $fixture -Force)
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_000_u.ydd'),[byte[]](1,2,3,4))
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_001_u.ydd'),[byte[]](1,2,3,4))
+        $env:MT_PACK_ORGANIZER_PICKER_TEST_PATH=$fixture
+        try {
+            if((Select-PackFolder) -ne $fixture){throw 'O seletor de pasta estilizado não confirmou a pasta escolhida.'}
+        } finally {Remove-Item Env:MT_PACK_ORGANIZER_PICKER_TEST_PATH -ErrorAction SilentlyContinue}
+        if(Confirm-RemoveProject 'Projeto de teste' $fixture){throw 'O botão cancelar do diálogo de exclusão não funcionou.'}
         Open-PackPath $fixture
         if($script:Pieces.Count -ne 2){throw 'O projeto de teste não indexou as duas peças.'}
         Mark-Current 'MANTER'
