@@ -1177,6 +1177,7 @@ function Get-MeshCached([IO.FileInfo]$ydd) {
 
 function Build-Viewport([IO.FileInfo]$ydd) {
     $parsed = Get-MeshCached $ydd
+    $firstViewport = ($null -eq $script:Camera)
 
     $viewport.Children.Clear()
     $scene = New-Object Windows.Media.Media3D.Model3DGroup
@@ -1217,16 +1218,14 @@ function Build-Viewport([IO.FileInfo]$ydd) {
     $maxDim = [Math]::Max($b.SizeX,[Math]::Max($b.SizeY,$b.SizeZ))
     if ($maxDim -lt 0.05) { $maxDim = 0.5 }
     $script:ModelExtent=$maxDim
-    $script:ModelScale=1.0; $script:ModelOffsetX=0.0; $script:ModelOffsetZ=0.0
-    $script:TransformScreenX=0.0; $script:TransformScreenY=0.0
     $script:BaseCameraDistance = $maxDim * 3.05
-    $script:CameraDistance = $script:BaseCameraDistance
-    $script:Yaw = 0.0
-    $script:Pitch = 0.0
-    $script:Roll = 0.0
+    # Trocar de peça não redefine enquadramento, escala nem orientação escolhidos.
+    if ($firstViewport) {
+        $script:CameraDistance = $script:BaseCameraDistance
+    }
     if($transformBox){$transformBox.Visibility='Collapsed';$script:TransformBoxEnabled=$false}
 
-    $script:Camera = New-Object Windows.Media.Media3D.PerspectiveCamera
+    if ($firstViewport) { $script:Camera = New-Object Windows.Media.Media3D.PerspectiveCamera }
     $script:Camera.FieldOfView = 36
     $viewport.Camera = $script:Camera
     Update-ModelTransform
@@ -1278,7 +1277,8 @@ function Show-TexturePreview($item,$target) {
         $texturePreviewPopup.Placement=[Windows.Controls.Primitives.PlacementMode]::Right
         $texturePreviewPopup.HorizontalOffset=10
         $texturePreviewPopup.VerticalOffset=-20
-        $texturePreviewPopup.IsOpen=$true
+        # Não recria o popup enquanto o cursor continua na mesma miniatura.
+        if (-not $texturePreviewPopup.IsOpen) { $texturePreviewPopup.IsOpen=$true }
         Load-ThumbnailForItem $item
     } catch { Write-AppLog ('Preview hover: '+$_.Exception.Message) }
 }
@@ -1785,6 +1785,12 @@ function Open-Pack {
         if($script:ThumbTimer){ try{$script:ThumbTimer.Stop()}catch{}; $script:ThumbTimer=$null }
         $script:PackPath = [string]$dlg.SelectedPath
         $script:Index = 0
+        # Um pack diferente inicia com enquadramento próprio; peças do mesmo
+        # pack compartilham a vista até o usuário modificá-la manualmente.
+        $script:Camera = $null
+        $script:Yaw = 0.0; $script:Pitch = 0.0; $script:Roll = 0.0
+        $script:ModelScale = 1.0
+        $script:ModelOffsetX = 0.0; $script:ModelOffsetZ = 0.0
         $script:TextureCache=@{}
         $script:TextureInfoCache=@{}
         $script:TextureCacheOrder=@()
@@ -2650,7 +2656,7 @@ $xamlText = @'
         </StackPanel></ScrollViewer></Border>
     </Grid>
 
-    <Popup Name="texturePreviewPopup" AllowsTransparency="True" StaysOpen="False" Placement="Right" PopupAnimation="Fade"><Border Width="360" Background="#111114" BorderBrush="#A320FF" BorderThickness="1" CornerRadius="12" Padding="12"><StackPanel><TextBlock Name="lblTexturePreviewName" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Name="lblTexturePreviewMeta" Foreground="#8E8992" FontSize="9" Margin="0,3,0,9"/><Border Width="334" Height="334" Background="#09090B" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="7"><Image Name="imgTexturePreview" Stretch="Uniform" Margin="6"/></Border></StackPanel></Border></Popup>
+    <Popup Name="texturePreviewPopup" AllowsTransparency="True" StaysOpen="True" IsHitTestVisible="False" Placement="Right" PopupAnimation="None"><Border Width="360" Background="#111114" BorderBrush="#A320FF" BorderThickness="1" CornerRadius="12" Padding="12"><StackPanel><TextBlock Name="lblTexturePreviewName" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Name="lblTexturePreviewMeta" Foreground="#8E8992" FontSize="9" Margin="0,3,0,9"/><Border Width="334" Height="334" Background="#09090B" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="7"><Image Name="imgTexturePreview" Stretch="Uniform" Margin="6"/></Border></StackPanel></Border></Popup>
 
     <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#E6000000" Panel.ZIndex="99"><Border Width="390" Padding="26" Background="#111114" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="14" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel><Image Name="imgLoadingLogo" Width="175" Height="78" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,16,0,10"/><ProgressBar Height="5" IsIndeterminate="True" Foreground="#A320FF" Background="#242429"/><TextBlock Text="O visualizador abre assim que o índice local estiver pronto." Foreground="#8E8992" FontSize="9" HorizontalAlignment="Center" Margin="0,9,0,0"/></StackPanel></Border></Border>
 
