@@ -1225,7 +1225,7 @@ function Save-State {
         total_pieces = @($script:Pieces).Count
         view = [ordered]@{
             yaw=$script:Yaw; pitch=$script:Pitch; roll=$script:Roll
-            scale=$script:ModelScale; offset_x=$script:ModelOffsetX; offset_z=$script:ModelOffsetZ
+            scale=$script:ModelScale; offset_x=$script:ModelOffsetX; offset_y=$script:ModelOffsetY; offset_z=$script:ModelOffsetZ
             camera_distance=$script:CameraDistance
             light_level=$script:LightLevel
         }
@@ -1566,7 +1566,7 @@ function Update-ModelTransform {
     $g.Children.Add((New-Object Windows.Media.Media3D.RotateTransform3D $yaw))
     $roll = New-Object Windows.Media.Media3D.AxisAngleRotation3D ((New-Object Windows.Media.Media3D.Vector3D 0,1,0)),$script:Roll
     $g.Children.Add((New-Object Windows.Media.Media3D.RotateTransform3D $roll))
-    $g.Children.Add((New-Object Windows.Media.Media3D.TranslateTransform3D $script:ModelOffsetX,0,$script:ModelOffsetZ))
+    $g.Children.Add((New-Object Windows.Media.Media3D.TranslateTransform3D $script:ModelOffsetX,$script:ModelOffsetY,$script:ModelOffsetZ))
     $script:ModelRoot.Transform = $g
     Update-TransformBoxVisual
 }
@@ -1641,7 +1641,9 @@ function Update-TransformBoxVisual {
     # A moldura segue o centro da malha mas não muda de dimensão ao girar.
     # Escala e zoom são as únicas operações que alteram seu tamanho.
     if($script:SelectionBoxWidth -gt 0 -and $script:SelectionBoxScale -gt 0 -and $script:SelectionBoxDistance -gt 0){
-        $factor=($script:ModelScale/$script:SelectionBoxScale)*($script:SelectionBoxDistance/[Math]::Max(0.001,$script:CameraDistance))
+        $referenceDepth=[Math]::Max(0.01,[double]$script:SelectionBoxDistance+[double]$script:SelectionBoxOffsetY)
+        $currentDepth=[Math]::Max(0.01,[double]$script:CameraDistance+[double]$script:ModelOffsetY)
+        $factor=($script:ModelScale/$script:SelectionBoxScale)*($referenceDepth/$currentDepth)
         $w=[Math]::Max(36.0,$script:SelectionBoxWidth*$factor)
         $h=[Math]::Max(36.0,$script:SelectionBoxHeight*$factor)
     }
@@ -1662,11 +1664,52 @@ function Set-TransformBox([bool]$show) {
             $script:SelectionBoxHeight=[double]$transformBox.Height
             $script:SelectionBoxScale=[double]$script:ModelScale
             $script:SelectionBoxDistance=[double]$script:CameraDistance
+            $script:SelectionBoxOffsetY=[double]$script:ModelOffsetY
         }
         $transformBox.Visibility='Visible'
     }
     else{$transformBox.Visibility='Collapsed';$script:SelectionBoxWidth=0.0;$script:SelectionBoxHeight=0.0}
     Update-TransformBoxVisual
+}
+
+function Invoke-TransformGizmoSelfTest {
+    $oldRoot=$script:ModelRoot;$oldCamera=$script:Camera;$oldBounds=$script:ModelBounds
+    $oldDistance=$script:CameraDistance;$oldScale=$script:ModelScale
+    $oldYaw=$script:Yaw;$oldPitch=$script:Pitch;$oldRoll=$script:Roll
+    $oldX=$script:ModelOffsetX;$oldY=$script:ModelOffsetY;$oldZ=$script:ModelOffsetZ
+    try {
+        $script:ModelRoot=New-Object Windows.Media.Media3D.ModelVisual3D
+        $script:ModelBounds=[Windows.Media.Media3D.Rect3D]::new(-1,-0.5,-1.4,2,1,2.8)
+        $script:Camera=New-Object Windows.Media.Media3D.PerspectiveCamera
+        $script:Camera.FieldOfView=45
+        $script:CameraDistance=6;$script:ModelScale=1
+        $script:Yaw=0;$script:Pitch=0;$script:Roll=0
+        $script:ModelOffsetX=0;$script:ModelOffsetY=0;$script:ModelOffsetZ=0
+        Update-ModelTransform
+        Set-TransformBox $true
+        $width=[double]$transformBox.Width;$height=[double]$transformBox.Height
+        if($width -lt 30 -or $height -lt 30){throw 'Caixa de seleção 3D não foi projetada.'}
+        $script:Yaw=73;$script:Pitch=28;$script:Roll=41
+        Update-ModelTransform
+        if([Math]::Abs([double]$transformBox.Width-$width) -gt 0.01 -or [Math]::Abs([double]$transformBox.Height-$height) -gt 0.01){
+            throw 'Caixa de seleção mudou de tamanho somente ao girar a peça.'
+        }
+        $script:ModelOffsetY=-1;Update-ModelTransform
+        if([double]$transformBox.Width -le $width){throw 'Movimento em profundidade não ajustou a projeção.'}
+        Set-TransformHover 'ROTATE_ROLL'
+        if($gizmoRoll.Opacity -lt 0.9 -or $gizmoYaw.Opacity -ge 0.5 -or $transformHoverPlane.Visibility -ne 'Visible'){
+            throw 'O realce de eixos do gizmo não alternou corretamente.'
+        }
+        Set-TransformHover 'MOVE_Y'
+        if($axisY.StrokeThickness -lt 4){throw 'A seta do eixo de profundidade não foi destacada.'}
+        Write-Host 'MT_PACK_ORGANIZER_GIZMO_SELFTEST_OK'
+    } finally {
+        Set-TransformBox $false;Set-TransformHover ''
+        $script:ModelRoot=$oldRoot;$script:Camera=$oldCamera;$script:ModelBounds=$oldBounds
+        $script:CameraDistance=$oldDistance;$script:ModelScale=$oldScale
+        $script:Yaw=$oldYaw;$script:Pitch=$oldPitch;$script:Roll=$oldRoll
+        $script:ModelOffsetX=$oldX;$script:ModelOffsetY=$oldY;$script:ModelOffsetZ=$oldZ
+    }
 }
 
 function Update-Camera {
@@ -1683,6 +1726,7 @@ function Reset-View {
     $script:Roll = 0.0
     $script:ModelScale=1.0
     $script:ModelOffsetX=0.0
+    $script:ModelOffsetY=0.0
     $script:ModelOffsetZ=0.0
     $script:TransformScreenX=0.0
     $script:TransformScreenY=0.0
@@ -1776,7 +1820,7 @@ function Build-Viewport([IO.FileInfo]$ydd) {
             $v=$script:SavedView
             $script:Yaw=[double]$v.yaw;$script:Pitch=[double]$v.pitch;$script:Roll=[double]$v.roll
             if([double]$v.scale -gt 0){$script:ModelScale=[double]$v.scale}
-            $script:ModelOffsetX=[double]$v.offset_x;$script:ModelOffsetZ=[double]$v.offset_z
+            $script:ModelOffsetX=[double]$v.offset_x;$script:ModelOffsetY=[double]$v.offset_y;$script:ModelOffsetZ=[double]$v.offset_z
             if([double]$v.camera_distance -gt 0){$script:CameraDistance=[double]$v.camera_distance}
             if($null -ne $v.light_level){$script:LightLevel=[int]$v.light_level}
             $script:SavedView=$null
@@ -2479,7 +2523,7 @@ function Open-PackPath([string]$selectedPath) {
         $script:Camera = $null
         $script:Yaw = 0.0; $script:Pitch = 0.0; $script:Roll = 0.0
         $script:ModelScale = 1.0
-        $script:ModelOffsetX = 0.0; $script:ModelOffsetZ = 0.0
+        $script:ModelOffsetX = 0.0; $script:ModelOffsetY = 0.0; $script:ModelOffsetZ = 0.0
         $script:TextureCache=@{}
         $script:TextureInfoCache=@{}
         $script:TextureCacheOrder=@()
@@ -3339,18 +3383,21 @@ $xamlText = @'
             <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="10,7" CornerRadius="10" Background="#19141F" BorderBrush="#543064" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="☀" Foreground="#D88BFF" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="ILUMINAÇÃO" Foreground="#DCC3E8" FontWeight="Bold" FontSize="9" VerticalAlignment="Center" Margin="0,0,9,0"/><Button Name="btnLightDown" Content="−" Width="29" Height="28" Padding="0" FontSize="17"/><Border Background="#261B2C" CornerRadius="5" Width="48" Margin="5,0" Padding="2" VerticalAlignment="Center"><TextBlock Name="lblLightValue" Text="50%" FontSize="11" FontWeight="Bold" TextAlignment="Center" Foreground="#FFFFFF"/></Border><Button Name="btnLightUp" Content="+" Width="29" Height="28" Padding="0" FontSize="16"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
                 <Border BorderBrush="#99959C" BorderThickness="1.3" Opacity="0.95"/>
+                <Border Name="transformHoverPlane" Background="#50D4AD64" Visibility="Collapsed" IsHitTestVisible="False" Margin="2"/>
                 <Rectangle Name="rotNW" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-5,-5,0,0" Cursor="SizeNWSE" ToolTip="Redimensionar proporcionalmente"/>
                 <Rectangle Name="rotNE" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0" Cursor="SizeNESW" ToolTip="Redimensionar proporcionalmente"/>
                 <Rectangle Name="rotSW" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-5,0,0,-5" Cursor="SizeNESW" ToolTip="Redimensionar proporcionalmente"/>
                 <Rectangle Name="rotSE" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-5,-5" Cursor="SizeNWSE" ToolTip="Redimensionar proporcionalmente"/>
                 <Rectangle Name="rotTop" Width="29" Height="6" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-3,0,0" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
                 <Rectangle Name="rotBottom" Width="29" Height="6" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-3" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
-                <Rectangle Name="rotLeft" Width="6" Height="29" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-3,0,0,0" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
-                <Rectangle Name="rotRight" Width="6" Height="29" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-3,0" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
+                <Rectangle Name="rotLeft" Width="6" Height="29" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-3,0,0,0" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
+                <Rectangle Name="rotRight" Width="6" Height="29" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-3,0" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
                 <Grid Width="144" Height="144" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
-                    <Ellipse Name="gizmoRoll" Width="102" Height="102" Stroke="#E8C900" StrokeThickness="2" Opacity="0.92" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
-                    <Ellipse Name="gizmoYaw" Width="116" Height="37" Stroke="#E8C900" StrokeThickness="1.8" Opacity="0.85" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
-                    <Ellipse Name="gizmoPitch" Width="37" Height="116" Stroke="#91A3B8" StrokeThickness="1.5" Opacity="0.45" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
+                    <Ellipse Name="gizmoRoll" Width="102" Height="102" Stroke="#E8C900" StrokeThickness="2" Opacity="0.34" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
+                    <Ellipse Name="gizmoYaw" Width="116" Height="37" Stroke="#E8C900" StrokeThickness="1.8" Opacity="0.30" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
+                    <Ellipse Name="gizmoPitch" Width="37" Height="116" Stroke="#91A3B8" StrokeThickness="1.5" Opacity="0.25" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
+                    <Line Name="axisY" X1="72" Y1="72" X2="39" Y2="105" Stroke="#5897F5" StrokeThickness="3" Cursor="SizeAll" ToolTip="Mover no eixo Y (profundidade)"/>
+                    <Polygon Name="axisYHead" Points="31,113 38,99 45,106" Fill="#5897F5" Cursor="SizeAll" ToolTip="Mover no eixo Y (profundidade)"/>
                     <Line Name="axisX" X1="72" Y1="72" X2="128" Y2="72" Stroke="#F05F68" StrokeThickness="4" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
                     <Polygon Name="axisXHead" Points="128,66 142,72 128,78" Fill="#F05F68" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
                     <Line Name="axisZ" X1="72" Y1="72" X2="72" Y2="16" Stroke="#55D978" StrokeThickness="4" Cursor="SizeNS" ToolTip="Mover no eixo Z"/>
@@ -3358,7 +3405,7 @@ $xamlText = @'
                     <Ellipse Width="14" Height="14" Fill="#D7DEE8" Stroke="#495260" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
-            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Text="Clique para selecionar • cantos = escala • setas = mover • anéis = girar • Shift = 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Name="lblTransformHint" Text="Clique para selecionar • cantos = escala • setas = mover • anéis = girar • Shift = 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
         </Grid></Border>
 
         <Border Grid.Column="4" Background="#111114" CornerRadius="13" BorderBrush="#2D2931" BorderThickness="1" Padding="15"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
@@ -3399,7 +3446,7 @@ try {
 foreach($n in @(
     'btnUpdate','btnHome','btnNewProject','lblHomeProjects','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','axisX','axisXHead','axisZ','axisZHead','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','axisX','axisXHead','axisY','axisYHead','axisZ','axisZHead','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -3427,7 +3474,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.28'
+$script:AppVersion = '0.9.29'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3454,7 +3501,9 @@ $script:TransformBoxEnabled=$false
 $script:TransformDragMode=$null
 $script:ModelScale=1.0
 $script:ModelOffsetX=0.0
+$script:ModelOffsetY=0.0
 $script:ModelOffsetZ=0.0
+$script:SelectionBoxOffsetY=0.0
 $script:ModelExtent=1.0
 $script:ModelBounds=$null
 $script:TransformScreenX=0.0
@@ -3624,8 +3673,13 @@ function Start-TransformDrag([string]$mode,$e) {
     $script:TransformDragBoxWidth=[double]$transformBox.Width
     $script:TransformDragBoxHeight=[double]$transformBox.Height
     $script:TransformStart=$e.GetPosition($viewHost)
+    $script:TransformCenterX=([double]$viewHost.ActualWidth/2.0)+[double]$transformBox.RenderTransform.X
+    $script:TransformCenterY=([double]$viewHost.ActualHeight/2.0)+[double]$transformBox.RenderTransform.Y
+    $script:TransformStartRadius=[Math]::Max(8.0,[Math]::Sqrt([Math]::Pow($script:TransformStart.X-$script:TransformCenterX,2)+[Math]::Pow($script:TransformStart.Y-$script:TransformCenterY,2)))
+    $script:TransformStartAngle=[Math]::Atan2($script:TransformStart.Y-$script:TransformCenterY,$script:TransformStart.X-$script:TransformCenterX)
     $script:TransformStartScale=$script:ModelScale
     $script:TransformStartX=$script:ModelOffsetX
+    $script:TransformStartY=$script:ModelOffsetY
     $script:TransformStartZ=$script:ModelOffsetZ
     $script:TransformStartScreenX=$script:TransformScreenX
     $script:TransformStartScreenY=$script:TransformScreenY
@@ -3633,7 +3687,44 @@ function Start-TransformDrag([string]$mode,$e) {
     $script:TransformStartPitch=$script:Pitch
     $script:TransformStartRoll=$script:Roll
     $viewHost.CaptureMouse() | Out-Null
+    Set-TransformHover $mode
     $e.Handled=$true
+}
+
+function Set-TransformHover([string]$mode) {
+    if($script:TransformDragMode){$mode=[string]$script:TransformDragMode}
+    $script:TransformHoverMode=$mode
+    foreach($ring in @($gizmoYaw,$gizmoPitch,$gizmoRoll)){
+        if($null -eq $ring){continue}
+        $ring.StrokeThickness=1.7
+        $ring.Opacity=if($mode){0.16}else{0.32}
+    }
+    $activeRing=switch($mode){'ROTATE_YAW'{$gizmoYaw};'ROTATE_PITCH'{$gizmoPitch};'ROTATE_ROLL'{$gizmoRoll};default{$null}}
+    if($activeRing){$activeRing.Opacity=1.0;$activeRing.StrokeThickness=3.4}
+    if($transformHoverPlane){$transformHoverPlane.Visibility=if($mode -in @('ROTATE_YAW','ROTATE_PITCH','ROTATE_ROLL','MOVE_Z')){'Visible'}else{'Collapsed'}}
+    foreach($handle in @($rotNW,$rotNE,$rotSW,$rotSE,$rotTop,$rotBottom,$rotLeft,$rotRight)){
+        if($null -eq $handle){continue}
+        $handle.Fill=New-SolidBrush '#D8C5B7';$handle.Opacity=0.85
+    }
+    foreach($arrow in @($axisX,$axisY,$axisZ)){$arrow.Opacity=0.85;$arrow.StrokeThickness=3}
+    foreach($arrowHead in @($axisXHead,$axisYHead,$axisZHead)){$arrowHead.Opacity=0.85}
+    $activeArrows=switch($mode){'MOVE_X'{@($axisX,$axisXHead)};'MOVE_Y'{@($axisY,$axisYHead)};'MOVE_Z'{@($axisZ,$axisZHead)};default{@()}}
+    foreach($a in @($activeArrows)){
+        if($null -eq $a){continue};$a.Opacity=1
+        if($a -is [Windows.Shapes.Line]){$a.StrokeThickness=5}
+    }
+    if($lblTransformHint){
+        $lblTransformHint.Text=switch($mode){
+            'MOVE_X'{'MOVER NO EIXO X • arraste a seta vermelha'}
+            'MOVE_Y'{'MOVER NO EIXO Y • profundidade (seta azul)'}
+            'MOVE_Z'{'MOVER NO EIXO Z • altura (seta verde)'}
+            'ROTATE_YAW'{'GIRAR NO EIXO Z • Shift = passos de 5°'}
+            'ROTATE_PITCH'{'GIRAR NO EIXO X • Shift = passos de 5°'}
+            'ROTATE_ROLL'{'GIRAR NO EIXO Y • Shift = passos de 5°'}
+            'SCALE'{'REDIMENSIONAR PROPORCIONALMENTE • arraste um canto'}
+            default{'Clique na peça • cantos = escala • setas = mover • anéis = girar • Shift = 5°'}
+        }
+    }
 }
 
 $transformBox.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE' $e})
@@ -3644,15 +3735,16 @@ $gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW'
 $gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
 $gizmoRoll.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
 foreach($h in @($axisX,$axisXHead)){$h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_X' $e})}
+foreach($h in @($axisY,$axisYHead)){$h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Y' $e})}
 foreach($h in @($axisZ,$axisZHead)){$h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Z' $e})}
-foreach($g in @($gizmoYaw,$gizmoPitch,$gizmoRoll)) {
-    $g.Add_MouseEnter({param($s,$e); $s.StrokeThickness=4})
-    $g.Add_MouseLeave({param($s,$e); $s.StrokeThickness=2})
-}
-foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE,$rotTop,$rotBottom,$rotLeft,$rotRight)) {
-    $h.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#FFFFFF'; $s.Opacity=1.0})
-    $h.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#E9D9BB'; $s.Opacity=0.90})
-}
+foreach($g in @($gizmoYaw,$rotLeft,$rotRight)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_YAW'})}
+foreach($g in @($gizmoPitch,$rotTop,$rotBottom)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_PITCH'})}
+$gizmoRoll.Add_MouseEnter({Set-TransformHover 'ROTATE_ROLL'})
+foreach($g in @($rotNW,$rotNE,$rotSW,$rotSE)){$g.Add_MouseEnter({Set-TransformHover 'SCALE';$g.Fill=New-SolidBrush '#FFF2D0';$g.Opacity=1})}
+foreach($g in @($axisX,$axisXHead)){$g.Add_MouseEnter({Set-TransformHover 'MOVE_X'})}
+foreach($g in @($axisY,$axisYHead)){$g.Add_MouseEnter({Set-TransformHover 'MOVE_Y'})}
+foreach($g in @($axisZ,$axisZHead)){$g.Add_MouseEnter({Set-TransformHover 'MOVE_Z'})}
+$transformBox.Add_MouseLeave({if(-not $script:TransformDragMode){Set-TransformHover ''}})
 
 
 $viewHost.Add_MouseLeftButtonDown({
@@ -3693,25 +3785,27 @@ $viewHost.Add_MouseMove({
         $p=$e.GetPosition($viewHost)
         if($script:TransformDragMode){
             $dx=$p.X-$script:TransformStart.X; $dy=$p.Y-$script:TransformStart.Y
-            if($script:TransformDragMode -in @('MOVE','MOVE_X','MOVE_Z')){
+            if($script:TransformDragMode -in @('MOVE','MOVE_X','MOVE_Y','MOVE_Z')){
                 $w=[Math]::Max(300,$viewHost.ActualWidth); $h=[Math]::Max(300,$viewHost.ActualHeight)
-                if($script:TransformDragMode -ne 'MOVE_Z'){$script:ModelOffsetX=$script:TransformStartX + ($dx/$w)*$script:ModelExtent*2.2}
-                if($script:TransformDragMode -ne 'MOVE_X'){$script:ModelOffsetZ=$script:TransformStartZ - ($dy/$h)*$script:ModelExtent*2.2}
-                $script:TransformScreenX=$script:TransformStartScreenX+$dx
-                $script:TransformScreenY=$script:TransformStartScreenY+$dy
+                if($script:TransformDragMode -in @('MOVE','MOVE_X')){$script:ModelOffsetX=$script:TransformStartX + ($dx/$w)*$script:ModelExtent*2.2}
+                if($script:TransformDragMode -in @('MOVE','MOVE_Z')){$script:ModelOffsetZ=$script:TransformStartZ - ($dy/$h)*$script:ModelExtent*2.2}
+                if($script:TransformDragMode -eq 'MOVE_Y'){$script:ModelOffsetY=[Math]::Max(-$script:CameraDistance*0.75,[Math]::Min($script:CameraDistance*3.0,$script:TransformStartY + (($dx+$dy)/$w)*$script:ModelExtent*2.5))}
+                if($script:TransformDragMode -eq 'MOVE'){$script:TransformScreenX=$script:TransformStartScreenX+$dx;$script:TransformScreenY=$script:TransformStartScreenY+$dy}
             } elseif($script:TransformDragMode -eq 'SCALE') {
-                $delta=($dx-$dy)*0.0035
-                $script:ModelScale=[Math]::Max(0.25,[Math]::Min(3.2,$script:TransformStartScale*(1+$delta)))
+                $radius=[Math]::Sqrt([Math]::Pow($p.X-$script:TransformCenterX,2)+[Math]::Pow($p.Y-$script:TransformCenterY,2))
+                $script:ModelScale=[Math]::Max(0.25,[Math]::Min(3.2,$script:TransformStartScale*($radius/$script:TransformStartRadius)))
             } elseif($script:TransformDragMode -eq 'ROTATE_YAW') {
-                $angle=$script:TransformStartYaw+$dx*0.10
+                $angle=$script:TransformStartYaw+($dx/[Math]::Max(80.0,$script:TransformDragBoxWidth))*180.0
                 if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift) -ne 0){$angle=[Math]::Round($angle/5.0)*5.0}
                 $script:Yaw=$angle
             } elseif($script:TransformDragMode -eq 'ROTATE_PITCH') {
-                $angle=$script:TransformStartPitch-$dy*0.10
+                $angle=$script:TransformStartPitch-($dy/[Math]::Max(80.0,$script:TransformDragBoxHeight))*180.0
                 if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift) -ne 0){$angle=[Math]::Round($angle/5.0)*5.0}
                 $script:Pitch=[Math]::Max(-89,[Math]::Min(89,$angle))
             } elseif($script:TransformDragMode -eq 'ROTATE_ROLL') {
-                $angle=$script:TransformStartRoll+$dx*0.10
+                $currentAngle=[Math]::Atan2($p.Y-$script:TransformCenterY,$p.X-$script:TransformCenterX)
+                $angle=$script:TransformStartRoll+($currentAngle-$script:TransformStartAngle)*180.0/[Math]::PI
+                if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift) -ne 0){$angle=[Math]::Round($angle/5.0)*5.0}
                 if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift) -ne 0){$angle=[Math]::Round($angle/5.0)*5.0}
                 $script:Roll=$angle
             }
@@ -3728,7 +3822,7 @@ $viewHost.Add_MouseMove({
 $viewHost.Add_MouseLeftButtonUp({
     Invoke-Safe {
         $changed=($script:TransformDragMode -or $script:Dragging)
-        if($script:TransformDragMode){$script:TransformDragMode=$null}
+        if($script:TransformDragMode){$script:TransformDragMode=$null;Set-TransformHover ''}
         $script:TransformDragBoxWidth=0.0;$script:TransformDragBoxHeight=0.0
         if ($script:Dragging) {$script:Dragging = $false}
         if ($viewHost.IsMouseCaptured) { $viewHost.ReleaseMouseCapture() }
@@ -3792,6 +3886,7 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         } finally {Remove-Item Env:MT_PACK_ORGANIZER_PICKER_TEST_PATH -ErrorAction SilentlyContinue}
         if(Confirm-RemoveProject 'Projeto de teste' $fixture){throw 'O botão cancelar do diálogo de exclusão não funcionou.'}
         Open-PackPath $fixture
+        Invoke-TransformGizmoSelfTest
         if($script:Pieces.Count -ne 2){throw 'O projeto de teste não indexou as duas peças.'}
         Mark-Current 'MANTER'
         if($script:Index -ne 1){throw 'O projeto de teste não navegou após YDD inválida.'}
