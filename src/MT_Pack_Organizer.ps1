@@ -774,6 +774,63 @@ function Get-StatePath {
     return (Join-Path $script:PackPath '_MT_PACK_ORGANIZER_STATE.json')
 }
 
+function Get-RecentProjectsPath {
+    $dir=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MTStudio\PackOrganizer'
+    if(-not (Test-Path -LiteralPath $dir)){[void](New-Item -ItemType Directory -Path $dir -Force)}
+    return (Join-Path $dir 'recent_projects.json')
+}
+
+function Get-RecentProjectPaths {
+    try {
+        $file=Get-RecentProjectsPath
+        if(Test-Path -LiteralPath $file){return @((Get-Content -LiteralPath $file -Raw | ConvertFrom-Json) | Where-Object { $_ -and (Test-Path -LiteralPath ([string]$_) -PathType Container) })}
+    } catch { Write-AppLog ('Projetos recentes: '+$_.Exception.Message) }
+    return @()
+}
+
+function Remember-Project([string]$path) {
+    if([string]::IsNullOrWhiteSpace($path)){return}
+    try {
+        $paths=@($path)+@(Get-RecentProjectPaths | Where-Object { [string]$_ -ne $path } | Select-Object -First 19)
+        ConvertTo-Json -InputObject @($paths) | Set-Content -LiteralPath (Get-RecentProjectsPath) -Encoding UTF8
+    } catch { Write-AppLog ('Salvar projeto recente: '+$_.Exception.Message) }
+}
+
+function Refresh-RecentProjects {
+    if($null -eq $lstRecentProjects){return}
+    $lstRecentProjects.Items.Clear()
+    foreach($path in @(Get-RecentProjectPaths)) {
+        $item=New-Object Windows.Controls.ListBoxItem
+        $item.Tag=[string]$path
+        $panel=New-Object Windows.Controls.StackPanel
+        $name=New-Object Windows.Controls.TextBlock
+        $name.Text=Split-Path ([string]$path) -Leaf
+        $name.FontWeight='SemiBold';$name.FontSize=12
+        [void]$panel.Children.Add($name)
+        $details=New-Object Windows.Controls.TextBlock
+        $details.FontSize=9;$details.Foreground=New-SolidBrush '#A79AAB'
+        $stateFile=Join-Path ([string]$path) '_MT_PACK_ORGANIZER_STATE.json'
+        $details.Text='Projeto ainda não revisado'
+        try {
+            if(Test-Path -LiteralPath $stateFile){
+                $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+                $keep=@($state.decisions.PSObject.Properties | Where-Object { $_.Value -eq 'MANTER' }).Count
+                $deleted=@($state.decisions.PSObject.Properties | Where-Object { $_.Value -eq 'EXCLUIR' }).Count
+                $total=[int]$state.total_pieces
+                $percent=if($total -gt 0){[Math]::Round(100*($keep+$deleted)/$total)}else{0}
+                $details.Text="Manter: $keep  •  Excluir: $deleted  •  Progresso: $percent%  •  Última peça: $([int]$state.index+1)"
+            }
+        } catch { Write-AppLog ('Resumo do projeto: '+$_.Exception.Message) }
+        [void]$panel.Children.Add($details)
+        $pathText=New-Object Windows.Controls.TextBlock
+        $pathText.Text=[string]$path;$pathText.FontSize=8;$pathText.Foreground=New-SolidBrush '#68646D'
+        $pathText.TextTrimming='CharacterEllipsis';[void]$panel.Children.Add($pathText)
+        $item.Content=$panel
+        [void]$lstRecentProjects.Items.Add($item)
+    }
+    $lblNoProjects.Visibility=if($lstRecentProjects.Items.Count -eq 0){'Visible'}else{'Collapsed'}
+}
+
 function Save-State {
     if (-not $script:PackPath) { return }
     if($txtAddonName){$script:AddonNameSaved=[string]$txtAddonName.Text}
@@ -781,6 +838,12 @@ function Save-State {
         version = 9
         pack = $script:PackPath
         index = $script:Index
+        total_pieces = @($script:Pieces).Count
+        view = [ordered]@{
+            yaw=$script:Yaw; pitch=$script:Pitch; roll=$script:Roll
+            scale=$script:ModelScale; offset_x=$script:ModelOffsetX; offset_z=$script:ModelOffsetZ
+            camera_distance=$script:CameraDistance
+        }
         decisions = $script:Decisions
         texture_deletions = @($script:TextureDeletions.Keys)
         category_overrides = $script:CategoryOverrides
@@ -821,6 +884,9 @@ function Load-State {
             if ($o.category_overrides) { foreach($prop in $o.category_overrides.PSObject.Properties){ $script:CategoryOverrides[$prop.Name]=[string]$prop.Value } }
             if ($o.hide_hair) { foreach($prop in $o.hide_hair.PSObject.Properties){ $script:HideHairSelections[$prop.Name]=[bool]$prop.Value } }
             if ($null -ne $o.index) { $script:Index = [int]$o.index }
+            if ($o.view) {
+                $script:SavedView=$o.view
+            }
             if ($o.addon_name) { $script:AddonNameSaved = [string]$o.addon_name }
         } catch { Write-AppLog "Estado anterior não pôde ser lido: $($_.Exception.Message)" }
     }
@@ -1110,6 +1176,13 @@ function Get-ProjectedModelBounds {
     [pscustomobject]@{Left=$minX;Top=$minY;Right=$maxX;Bottom=$maxY}
 }
 
+function Update-Lighting {
+    if(-not $script:AmbientLight){return}
+    $value=if($sliderLight){[double]$sliderLight.Value}else{50.0}
+    $channel=[byte][Math]::Round([Math]::Max(35,[Math]::Min(255,35+$value*2.2)))
+    $script:AmbientLight.Color=[Windows.Media.Color]::FromRgb($channel,$channel,$channel)
+}
+
 function Update-TransformBoxVisual {
     if($null -eq $transformBox -or -not $script:TransformBoxEnabled){return}
     $pb=Get-ProjectedModelBounds
@@ -1121,6 +1194,11 @@ function Update-TransformBoxVisual {
     $right=[Math]::Min($vw-5.0,[double]$pb.Right+$pad)
     $bottom=[Math]::Min($vh-5.0,[double]$pb.Bottom+$pad)
     $w=[Math]::Max(36.0,$right-$left); $h=[Math]::Max(36.0,$bottom-$top)
+    # Durante rotação, a caixa mantém o tamanho inicial do gesto.
+    # Apenas o controle de escala deve redimensioná-la intencionalmente.
+    if($script:TransformDragMode -like 'ROTATE_*' -and $script:TransformDragBoxWidth -gt 0){
+        $w=$script:TransformDragBoxWidth;$h=$script:TransformDragBoxHeight
+    }
     $centerX=($left+$right)/2.0; $centerY=($top+$bottom)/2.0
     $transformBox.Width=$w
     $transformBox.Height=$h
@@ -1154,6 +1232,7 @@ function Reset-View {
     if ($script:BaseCameraDistance -gt 0) { $script:CameraDistance = $script:BaseCameraDistance }
     Update-ModelTransform
     Update-Camera
+    Save-State
 }
 
 function Get-MeshCached([IO.FileInfo]$ydd) {
@@ -1183,6 +1262,7 @@ function Build-Viewport([IO.FileInfo]$ydd) {
     $scene = New-Object Windows.Media.Media3D.Model3DGroup
 
     $ambient = New-Object Windows.Media.Media3D.AmbientLight ([Windows.Media.ColorConverter]::ConvertFromString('#B0B0B0'))
+    $script:AmbientLight=$ambient
     $key = New-Object Windows.Media.Media3D.DirectionalLight ([Windows.Media.ColorConverter]::ConvertFromString('#FFFFFF')),([Windows.Media.Media3D.Vector3D]::new(-1,1,-1))
     $fill = New-Object Windows.Media.Media3D.DirectionalLight ([Windows.Media.ColorConverter]::ConvertFromString('#777777')),([Windows.Media.Media3D.Vector3D]::new(1,-1,0.5))
     $scene.Children.Add($ambient); $scene.Children.Add($key); $scene.Children.Add($fill)
@@ -1222,6 +1302,14 @@ function Build-Viewport([IO.FileInfo]$ydd) {
     # Trocar de peça não redefine enquadramento, escala nem orientação escolhidos.
     if ($firstViewport) {
         $script:CameraDistance = $script:BaseCameraDistance
+        if($script:SavedView) {
+            $v=$script:SavedView
+            $script:Yaw=[double]$v.yaw;$script:Pitch=[double]$v.pitch;$script:Roll=[double]$v.roll
+            if([double]$v.scale -gt 0){$script:ModelScale=[double]$v.scale}
+            $script:ModelOffsetX=[double]$v.offset_x;$script:ModelOffsetZ=[double]$v.offset_z
+            if([double]$v.camera_distance -gt 0){$script:CameraDistance=[double]$v.camera_distance}
+            $script:SavedView=$null
+        }
     }
     if($transformBox){$transformBox.Visibility='Collapsed';$script:TransformBoxEnabled=$false}
 
@@ -1230,6 +1318,7 @@ function Build-Viewport([IO.FileInfo]$ydd) {
     $viewport.Camera = $script:Camera
     Update-ModelTransform
     Update-Camera
+    Update-Lighting
     Set-NeutralMaterial
 
     $lblMesh.Text = "$($parsed.Vertices) vértices  •  $($parsed.Triangles) triângulos"
@@ -1508,7 +1597,12 @@ function Toggle-TextureDelete {
     # Recria a lista para mostrar imediatamente a textura marcada/desmarcada.
     $ydd = $script:Pieces[$script:Index]
     $selectedPath = $path
-    Populate-Textures $ydd
+    try { Populate-Textures $ydd }
+    catch {
+        Write-AppLog ('Falha ao carregar texturas '+$ydd.FullName+': '+$_.Exception.ToString())
+        $lstTextures.Items.Clear();$lblTextureCount.Text='0 TEXTURAS'
+        $lblTextureInfo.Text='Não foi possível ler as texturas desta peça.'
+    }
     foreach ($it in @($lstTextures.Items)) {
         if ($it.Tag -and ([string]$it.Tag -eq $selectedPath)) { $lstTextures.SelectedItem = $it; break }
     }
@@ -1584,10 +1678,17 @@ function Load-CurrentPiece {
     $btnNext.IsEnabled = ($indices.Count -gt 0 -and $pos -lt $indices.Count-1)
     $btnLast.IsEnabled = $btnNext.IsEnabled
 
-    Build-Viewport $ydd
+    try { Build-Viewport $ydd }
+    catch {
+        # Um drawable inválido não deve impedir a revisão das outras peças.
+        Write-AppLog ('Falha ao carregar malha '+$ydd.FullName+': '+$_.Exception.ToString())
+        $viewport.Children.Clear();$script:ModelRoot=$null;$script:ModelBounds=$null
+        $lblMesh.Text='Não foi possível visualizar esta peça (arquivo inválido ou incompatível).'
+    }
     Populate-Textures $ydd
     Update-Decision
     Update-Stats
+    Save-State
 }
 
 function Go-FirstPiece {
@@ -1778,13 +1879,22 @@ function Open-Pack {
     $dlg.Description = 'Selecione a pasta stream do pack'
     if ($dlg.ShowDialog() -ne 'OK') { return }
 
+    Open-PackPath ([string]$dlg.SelectedPath)
+}
+
+function Open-PackPath([string]$selectedPath) {
+    if(-not (Test-Path -LiteralPath $selectedPath -PathType Container)){
+        Show-Error 'A pasta deste projeto não existe mais.';Refresh-RecentProjects;return
+    }
+
     $stage='INICIALIZAÇÃO'
     Set-Loading $true 'INDEXANDO O PACK...'
     try {
         Ensure-RuntimeCollections
         if($script:ThumbTimer){ try{$script:ThumbTimer.Stop()}catch{}; $script:ThumbTimer=$null }
-        $script:PackPath = [string]$dlg.SelectedPath
+        $script:PackPath = $selectedPath
         $script:Index = 0
+        $script:SavedView=$null
         # Um pack diferente inicia com enquadramento próprio; peças do mesmo
         # pack compartilham a vista até o usuário modificá-la manualmente.
         $script:Camera = $null
@@ -1819,6 +1929,8 @@ function Open-Pack {
         $lblLoading.Text='ABRINDO A PRIMEIRA PEÇA...'
         [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
         Load-CurrentPiece
+        Remember-Project $script:PackPath
+        Refresh-RecentProjects
     } catch {
         $line=$_.InvocationInfo.ScriptLineNumber
         $pos=$_.InvocationInfo.PositionMessage
@@ -2603,7 +2715,7 @@ $xamlText = @'
 
     <Grid Grid.Row="2" Name="emptyState">
         <Border Width="560" Padding="34" Background="#0D0D10" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="16" HorizontalAlignment="Center" VerticalAlignment="Center">
-            <StackPanel><Image Name="imgEmptyLogo" Width="245" Height="105" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Text="PACK ORGANIZER" FontSize="27" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,18,0,0"/><TextBlock Text="Abra a pasta stream para visualizar as roupas, revisar texturas e montar o add-on." Foreground="#8E8992" TextAlignment="Center" TextWrapping="Wrap" Margin="45,8,45,0"/><Border Background="#160A1F" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="60,20,60,0"><TextBlock Text="Tudo é processado localmente no seu computador." Foreground="#D88BFF" FontSize="10" HorizontalAlignment="Center"/></Border></StackPanel>
+            <StackPanel><Image Name="imgEmptyLogo" Width="245" Height="105" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Text="PACK ORGANIZER" FontSize="27" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,18,0,0"/><TextBlock Text="Abra a pasta stream para visualizar as roupas, revisar texturas e montar o add-on." Foreground="#8E8992" TextAlignment="Center" TextWrapping="Wrap" Margin="45,8,45,0"/><Border Background="#160A1F" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="60,20,60,0"><TextBlock Text="Tudo é processado localmente no seu computador." Foreground="#D88BFF" FontSize="10" HorizontalAlignment="Center"/></Border><TextBlock Text="MEUS PROJETOS" Foreground="#D88BFF" FontSize="11" FontWeight="Bold" Margin="0,22,0,9"/><TextBlock Name="lblNoProjects" Text="Nenhum projeto recente. Clique em ABRIR PACK para começar." Foreground="#817A89" FontSize="10"/><ListBox Name="lstRecentProjects" MaxHeight="250" ToolTip="Clique duas vezes para continuar um projeto na última peça visualizada"/></StackPanel>
         </Border>
     </Grid>
 
@@ -2627,6 +2739,7 @@ $xamlText = @'
 
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
+            <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="12,8" CornerRadius="8" Background="#D0141417"><StackPanel Orientation="Horizontal"><TextBlock Text="LUZ" Foreground="#D88BFF" FontWeight="Bold" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/><Slider Name="sliderLight" Width="130" Minimum="0" Maximum="100" Value="50" ToolTip="Intensidade da iluminação ambiente"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
                 <Border BorderBrush="#B16BE0" BorderThickness="1.25" Opacity="0.96"/>
                 <Rectangle Name="rotNW" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0" Cursor="Hand" ToolTip="Rotacionar"/>
@@ -2684,8 +2797,8 @@ try {
 
 foreach($n in @(
     'btnOpen','btnUpdate','lblPackName','lblPackPath','emptyState','mainContent',
-    'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','sliderLight','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -2696,6 +2809,7 @@ $script:Pieces = @()
 $script:Decisions = @{}
 $script:TextureDeletions = @{}
 $script:Index = 0
+$script:SavedView=$null
 $script:TextureCache = @{}
 $script:TextureCacheOrder = @()
 $script:TextureInfoCache = @{}
@@ -2791,6 +2905,14 @@ public static class MtNativeWindow {
 } catch { Write-AppLog ('Logo/assets: '+$_.Exception.Message) }
 
 $btnOpen.Add_Click({ Invoke-Safe { Open-Pack } })
+$sliderLight.Add_ValueChanged({ Update-Lighting })
+$lstRecentProjects.Add_MouseDoubleClick({
+    if($lstRecentProjects.SelectedItem){
+        $path=[string]$lstRecentProjects.SelectedItem.Tag
+        Invoke-Safe { Open-PackPath $path }
+    }
+})
+Refresh-RecentProjects
 $btnUpdate.Add_Click({ Invoke-Safe { Confirm-And-InstallUpdate } })
 $btnPrev.Add_Click({ Invoke-Safe { Navigate-Piece -1 } })
 $script:CategoryItems=@(
@@ -2844,6 +2966,8 @@ $lstTextures.Add_SelectionChanged({
 function Start-TransformDrag([string]$mode,$e) {
     if(-not $script:ModelRoot){return}
     $script:TransformDragMode=$mode
+    $script:TransformDragBoxWidth=[double]$transformBox.Width
+    $script:TransformDragBoxHeight=[double]$transformBox.Height
     $script:TransformStart=$e.GetPosition($viewHost)
     $script:TransformStartScale=$script:ModelScale
     $script:TransformStartX=$script:ModelOffsetX
@@ -2860,7 +2984,7 @@ function Start-TransformDrag([string]$mode,$e) {
 $transformBox.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE' $e})
 foreach($h in @($rotLeft,$rotRight)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e}) }
 foreach($h in @($rotTop,$rotBottom)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e}) }
-foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e}) }
+foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'SCALE' $e}) }
 $gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e})
 $gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
 $gizmoRoll.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
@@ -2946,9 +3070,12 @@ $viewHost.Add_MouseMove({
 
 $viewHost.Add_MouseLeftButtonUp({
     Invoke-Safe {
+        $changed=($script:TransformDragMode -or $script:Dragging)
         if($script:TransformDragMode){$script:TransformDragMode=$null}
+        $script:TransformDragBoxWidth=0.0;$script:TransformDragBoxHeight=0.0
         if ($script:Dragging) {$script:Dragging = $false}
         if ($viewHost.IsMouseCaptured) { $viewHost.ReleaseMouseCapture() }
+        if($changed){Save-State}
     }
 })
 
@@ -2963,6 +3090,7 @@ $viewHost.Add_MouseWheel({
         )
         Update-Camera
         Update-TransformBoxVisual
+        Save-State
         $e.Handled = $true
     }
 })
