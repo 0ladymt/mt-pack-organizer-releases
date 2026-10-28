@@ -1,6 +1,10 @@
 name: Build e publicar MT Pack Organizer
 
 on:
+  pull_request:
+    paths:
+      - "src/**"
+      - ".github/workflows/publish-release.yml"
   push:
     branches:
       - main
@@ -74,20 +78,37 @@ jobs:
             if ((Get-Item $asset).Length -lt 1000) { throw "Asset oficial inválido ou incompleto: $asset" }
           }
 
-      - name: Gerar ICO válido da borboleta oficial
+      - name: Gerar ICO preto com borboleta oficial para atalho e janela
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
           $pngPath = (Resolve-Path "work\assets\mt_butterfly_icon.png").Path
           $png = [System.Drawing.Bitmap]::FromFile($pngPath)
-          $hIcon = $png.GetHicon()
+          $canvas = New-Object System.Drawing.Bitmap 256,256
+          $graphics=[System.Drawing.Graphics]::FromImage($canvas)
+          $graphics.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $graphics.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+          $graphics.Clear([System.Drawing.Color]::Transparent)
+          $border=New-Object System.Drawing.Drawing2D.GraphicsPath
+          $x=10;$y=10;$w=236;$h=236;$r=42;$d=$r*2
+          $border.AddArc($x,$y,$d,$d,180,90);$border.AddArc($x+$w-$d,$y,$d,$d,270,90)
+          $border.AddArc($x+$w-$d,$y+$h-$d,$d,$d,0,90);$border.AddArc($x,$y+$h-$d,$d,$d,90,90)
+          $border.CloseFigure()
+          $background=New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255,12,10,16))
+          $outline=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255,163,32,255)),5
+          $graphics.FillPath($background,$border);$graphics.DrawPath($outline,$border)
+          $scale=[Math]::Min(180.0/$png.Width,180.0/$png.Height)
+          $dw=[int]($png.Width*$scale);$dh=[int]($png.Height*$scale)
+          $graphics.DrawImage($png,[int]((256-$dw)/2),[int]((256-$dh)/2),$dw,$dh)
+          $hIcon = $canvas.GetHicon()
           $ico = [System.Drawing.Icon]::FromHandle($hIcon)
           $dest = Join-Path (Resolve-Path "work\assets").Path "mt_app_icon.ico"
           $fs = [System.IO.File]::Open($dest,[System.IO.FileMode]::Create)
           $ico.Save($fs)
           $fs.Dispose()
           $ico.Dispose()
+          $graphics.Dispose();$background.Dispose();$outline.Dispose();$border.Dispose();$canvas.Dispose()
           $png.Dispose()
           if (-not (Test-Path $dest)) { throw "Falha ao gerar mt_app_icon.ico." }
           if ((Get-Item $dest).Length -lt 1000) { throw "mt_app_icon.ico foi gerado incompleto." }
@@ -290,8 +311,17 @@ jobs:
           Pop-Location
           if (-not (Test-Path "build\installer\MT_Pack_Organizer_Setup_$env:VERSION.exe")) { throw "Instalador não foi compilado." }
 
+      - name: Guardar instalador de teste sem publicar
+        if: github.event_name == 'pull_request' && steps.existing.outputs.exists != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MT-Pack-Organizer-preview
+          path: build/installer/MT_Pack_Organizer_Setup_*.exe
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publicar Release automaticamente
-        if: steps.existing.outputs.exists != 'true'
+        if: github.event_name == 'push' && steps.existing.outputs.exists != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -321,6 +351,8 @@ jobs:
         run: |
           if ($env:EXISTS -eq 'true') {
             "### $env:TAG já estava publicado" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          } elseif ('${{ github.event_name }}' -eq 'pull_request') {
+            "### Build de validação $env:TAG: sem publicação" | Out-File $env:GITHUB_STEP_SUMMARY -Append
           } else {
             "### MT Pack Organizer $env:VERSION publicado automaticamente" | Out-File $env:GITHUB_STEP_SUMMARY -Append
             "" | Out-File $env:GITHUB_STEP_SUMMARY -Append

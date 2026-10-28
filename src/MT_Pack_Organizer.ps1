@@ -725,6 +725,70 @@ public static class MtRageParser
         return result.ToArray();
     }
 
+    // Alguns YDDs guardam os recursos de textura dentro dos próprios shaders.
+    // Reutilizamos o leitor de textura RSC7, sem depender de uma YTD externa.
+    public static TextureResult[] LoadEmbeddedTextures(string path)
+    {
+        Rsc r = ReadRsc(path);
+        List<ulong> drawables = new List<ulong>();
+        if (r.SystemData.Length >= 0x40)
+        {
+            int count = U16(r.SystemData, 0x38);
+            byte[] arr = count > 0 && count < 4096 ? r.Resolve(U64(r.SystemData, 0x30), count * 8) : null;
+            if (arr != null) for (int i = 0; i < count; i++) drawables.Add(U64(arr, i * 8));
+        }
+        if (drawables.Count == 0) drawables.Add(SYSTEM_BASE);
+
+        HashSet<ulong> seen = new HashSet<ulong>();
+        List<TextureResult> results = new List<TextureResult>();
+        foreach (ulong drawablePtr in drawables)
+        {
+            byte[] drawable = r.Resolve(drawablePtr, 0xD0);
+            if (drawable == null) continue;
+            byte[] group = r.Resolve(U64(drawable, 0x10), 0x40);
+            if (group == null) continue;
+            int shaderCount = U16(group, 0x18);
+            byte[] shaderPtrs = shaderCount > 0 && shaderCount < 2048 ? r.Resolve(U64(group, 0x10), shaderCount * 8) : null;
+            if (shaderPtrs == null) continue;
+            for (int si = 0; si < shaderCount; si++)
+            {
+                byte[] shader = r.Resolve(U64(shaderPtrs, si * 8), 0x30);
+                if (shader == null) continue;
+                ulong paramPtr = U64(shader, 0);
+                int paramCount = shader[0x10];
+                byte[] parameters = paramPtr != 0 && paramCount > 0 ? r.Resolve(paramPtr, paramCount * 16) : null;
+                if (parameters == null) continue;
+                for (int pi = 0; pi < paramCount; pi++)
+                {
+                    if (parameters[pi * 16] != 0) continue;
+                    ulong texturePtr = U64(parameters, pi * 16 + 8);
+                    if (texturePtr == 0 || !seen.Add(texturePtr)) continue;
+                    byte[] tr = r.Resolve(texturePtr, 0x90);
+                    if (tr == null) continue;
+                    TexInfo ti = new TexInfo();
+                    ti.Name = r.StringAt(U64(tr, 0x28));
+                    ti.Width = U16(tr, 0x50); ti.Height = U16(tr, 0x52);
+                    ti.Stride = U16(tr, 0x56); ti.Format = U32(tr, 0x58);
+                    ti.Levels = tr[0x5D]; ti.DataPtr = U64(tr, 0x70);
+                    ti.Usage = U32(tr, 0x40) & 0x1F;
+                    if (ti.Width < 1 || ti.Height < 1 || ti.Width > 8192 || ti.Height > 8192 || ti.DataPtr == 0) continue;
+                    try
+                    {
+                        byte[] pixels = DecodeTexture(r, ti);
+                        BitmapSource bmp = BitmapSource.Create(ti.Width, ti.Height, 96, 96, PixelFormats.Bgra32, null, pixels, ti.Width * 4);
+                        bmp.Freeze();
+                        TextureResult result = new TextureResult();
+                        result.Name = ti.Name; result.Width = ti.Width; result.Height = ti.Height;
+                        result.Format = ti.Format; result.Usage = ti.Usage; result.Bitmap = bmp;
+                        results.Add(result);
+                    }
+                    catch { /* formato de textura não suportado: tentar as demais */ }
+                }
+            }
+        }
+        return results.ToArray();
+    }
+
     public static BitmapSource BitmapForRenderBucket(BitmapSource input, int renderBucket)
     {
         int w=input.PixelWidth, h=input.PixelHeight, stride=w*4;
@@ -774,6 +838,64 @@ function Get-StatePath {
     return (Join-Path $script:PackPath '_MT_PACK_ORGANIZER_STATE.json')
 }
 
+function Get-RecentProjectsPath {
+    $dir=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MTStudio\PackOrganizer'
+    if(-not (Test-Path -LiteralPath $dir)){[void](New-Item -ItemType Directory -Path $dir -Force)}
+    return (Join-Path $dir 'recent_projects.json')
+}
+
+function Get-RecentProjectPaths {
+    try {
+        $file=Get-RecentProjectsPath
+        if(Test-Path -LiteralPath $file){return @((Get-Content -LiteralPath $file -Raw | ConvertFrom-Json) | Where-Object { $_ -and (Test-Path -LiteralPath ([string]$_) -PathType Container) })}
+    } catch { Write-AppLog ('Projetos recentes: '+$_.Exception.Message) }
+    return @()
+}
+
+function Remember-Project([string]$path) {
+    if([string]::IsNullOrWhiteSpace($path)){return}
+    try {
+        $paths=@($path)+@(Get-RecentProjectPaths | Where-Object { [string]$_ -ne $path } | Select-Object -First 19)
+        ConvertTo-Json -InputObject @($paths) | Set-Content -LiteralPath (Get-RecentProjectsPath) -Encoding UTF8
+    } catch { Write-AppLog ('Salvar projeto recente: '+$_.Exception.Message) }
+}
+
+function Refresh-RecentProjects {
+    if($null -eq $lstRecentProjects){return}
+    $lstRecentProjects.Items.Clear()
+    foreach($path in @(Get-RecentProjectPaths)) {
+        $item=New-Object Windows.Controls.ListBoxItem
+        $item.Tag=[string]$path
+        $panel=New-Object Windows.Controls.StackPanel
+        $name=New-Object Windows.Controls.TextBlock
+        $name.Text=Split-Path ([string]$path) -Leaf
+        $name.FontWeight='SemiBold';$name.FontSize=12
+        [void]$panel.Children.Add($name)
+        $details=New-Object Windows.Controls.TextBlock
+        $details.FontSize=9;$details.Foreground=New-SolidBrush '#A79AAB'
+        $stateFile=Join-Path ([string]$path) '_MT_PACK_ORGANIZER_STATE.json'
+        $details.Text='Projeto ainda não revisado'
+        try {
+            if(Test-Path -LiteralPath $stateFile){
+                $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+                $allDecisions=if($state.decisions){@($state.decisions.PSObject.Properties)}else{@()}
+                $keep=@($allDecisions | Where-Object { $_.Value -eq 'MANTER' }).Count
+                $deleted=@($allDecisions | Where-Object { $_.Value -eq 'EXCLUIR' }).Count
+                $total=[int]$state.total_pieces
+                $percent=if($total -gt 0){[Math]::Round(100*($keep+$deleted)/$total)}else{0}
+                $details.Text="Manter: $keep  •  Excluir: $deleted  •  Progresso: $percent%  •  Última peça: $([int]$state.index+1)"
+            }
+        } catch { Write-AppLog ('Resumo do projeto: '+$_.Exception.Message) }
+        [void]$panel.Children.Add($details)
+        $pathText=New-Object Windows.Controls.TextBlock
+        $pathText.Text=[string]$path;$pathText.FontSize=8;$pathText.Foreground=New-SolidBrush '#68646D'
+        $pathText.TextTrimming='CharacterEllipsis';[void]$panel.Children.Add($pathText)
+        $item.Content=$panel
+        [void]$lstRecentProjects.Items.Add($item)
+    }
+    $lblNoProjects.Visibility=if($lstRecentProjects.Items.Count -eq 0){'Visible'}else{'Collapsed'}
+}
+
 function Save-State {
     if (-not $script:PackPath) { return }
     if($txtAddonName){$script:AddonNameSaved=[string]$txtAddonName.Text}
@@ -781,6 +903,13 @@ function Save-State {
         version = 9
         pack = $script:PackPath
         index = $script:Index
+        total_pieces = @($script:Pieces).Count
+        view = [ordered]@{
+            yaw=$script:Yaw; pitch=$script:Pitch; roll=$script:Roll
+            scale=$script:ModelScale; offset_x=$script:ModelOffsetX; offset_z=$script:ModelOffsetZ
+            camera_distance=$script:CameraDistance
+        }
+        prop_alignment = $script:PropAlignment
         decisions = $script:Decisions
         texture_deletions = @($script:TextureDeletions.Keys)
         category_overrides = $script:CategoryOverrides
@@ -793,7 +922,12 @@ function Save-State {
         }
     }
     # Estado leve: NÃO recalcula plano/build a cada clique. Isso era uma das maiores causas de travamento.
-    $obj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Get-StatePath) -Encoding UTF8
+    try {
+        $target=Get-StatePath
+        $temp=$target+'.tmp'
+        $obj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temp -Encoding UTF8
+        Move-Item -LiteralPath $temp -Destination $target -Force
+    } catch { Write-AppLog ('Não foi possível salvar o progresso: '+$_.Exception.Message) }
 }
 
 function Load-State {
@@ -821,6 +955,10 @@ function Load-State {
             if ($o.category_overrides) { foreach($prop in $o.category_overrides.PSObject.Properties){ $script:CategoryOverrides[$prop.Name]=[string]$prop.Value } }
             if ($o.hide_hair) { foreach($prop in $o.hide_hair.PSObject.Properties){ $script:HideHairSelections[$prop.Name]=[bool]$prop.Value } }
             if ($null -ne $o.index) { $script:Index = [int]$o.index }
+            if ($o.view) {
+                $script:SavedView=$o.view
+            }
+            if($o.prop_alignment){foreach($p in $o.prop_alignment.PSObject.Properties){$script:PropAlignment[$p.Name]=$p.Value}}
             if ($o.addon_name) { $script:AddonNameSaved = [string]$o.addon_name }
         } catch { Write-AppLog "Estado anterior não pôde ser lido: $($_.Exception.Message)" }
     }
@@ -1066,6 +1204,17 @@ function Update-ModelTransform {
     $g.Children.Add((New-Object Windows.Media.Media3D.TranslateTransform3D (-$script:CenterX),(-$script:CenterY),(-$script:CenterZ)))
     $g.Children.Add((New-Object Windows.Media.Media3D.ScaleTransform3D $script:ModelScale,$script:ModelScale,$script:ModelScale))
 
+    # Props da cabeça usam coordenadas locais diferentes das roupas do PED.
+    # A orientação é aplicada só à prévia, nunca aos arquivos originais.
+    if($script:CurrentPropSlot -in @('p_head','p_eyes')){
+        $key=[string]$script:CurrentPropSlot
+        $alignment=if($script:PropAlignment.ContainsKey($key)){$script:PropAlignment[$key]}else{[pscustomobject]@{Pitch=90;Yaw=180}}
+        $basePitch=New-Object Windows.Media.Media3D.AxisAngleRotation3D ([Windows.Media.Media3D.Vector3D]::new(1,0,0)),([double]$alignment.Pitch)
+        $baseYaw=New-Object Windows.Media.Media3D.AxisAngleRotation3D ([Windows.Media.Media3D.Vector3D]::new(0,0,1)),([double]$alignment.Yaw)
+        $g.Children.Add((New-Object Windows.Media.Media3D.RotateTransform3D $basePitch))
+        $g.Children.Add((New-Object Windows.Media.Media3D.RotateTransform3D $baseYaw))
+    }
+
     $pitch = New-Object Windows.Media.Media3D.AxisAngleRotation3D ([Windows.Media.Media3D.Vector3D]::new(1,0,0)),$script:Pitch
     $yaw = New-Object Windows.Media.Media3D.AxisAngleRotation3D ([Windows.Media.Media3D.Vector3D]::new(0,0,1)),$script:Yaw
     $g.Children.Add((New-Object Windows.Media.Media3D.RotateTransform3D $pitch))
@@ -1110,6 +1259,13 @@ function Get-ProjectedModelBounds {
     [pscustomobject]@{Left=$minX;Top=$minY;Right=$maxX;Bottom=$maxY}
 }
 
+function Update-Lighting {
+    if(-not $script:AmbientLight){return}
+    $value=if($sliderLight){[double]$sliderLight.Value}else{50.0}
+    $channel=[byte][Math]::Round([Math]::Max(35,[Math]::Min(255,35+$value*2.2)))
+    $script:AmbientLight.Color=[Windows.Media.Color]::FromRgb($channel,$channel,$channel)
+}
+
 function Update-TransformBoxVisual {
     if($null -eq $transformBox -or -not $script:TransformBoxEnabled){return}
     $pb=Get-ProjectedModelBounds
@@ -1121,6 +1277,13 @@ function Update-TransformBoxVisual {
     $right=[Math]::Min($vw-5.0,[double]$pb.Right+$pad)
     $bottom=[Math]::Min($vh-5.0,[double]$pb.Bottom+$pad)
     $w=[Math]::Max(36.0,$right-$left); $h=[Math]::Max(36.0,$bottom-$top)
+    # A moldura segue o centro da malha mas não muda de dimensão ao girar.
+    # Escala e zoom são as únicas operações que alteram seu tamanho.
+    if($script:SelectionBoxWidth -gt 0 -and $script:SelectionBoxScale -gt 0 -and $script:SelectionBoxDistance -gt 0){
+        $factor=($script:ModelScale/$script:SelectionBoxScale)*($script:SelectionBoxDistance/[Math]::Max(0.001,$script:CameraDistance))
+        $w=[Math]::Max(36.0,$script:SelectionBoxWidth*$factor)
+        $h=[Math]::Max(36.0,$script:SelectionBoxHeight*$factor)
+    }
     $centerX=($left+$right)/2.0; $centerY=($top+$bottom)/2.0
     $transformBox.Width=$w
     $transformBox.Height=$h
@@ -1129,8 +1292,19 @@ function Update-TransformBoxVisual {
 
 function Set-TransformBox([bool]$show) {
     $script:TransformBoxEnabled=$show
-    if($show){$transformBox.Visibility='Visible'}
-    else{$transformBox.Visibility='Collapsed'}
+    if($show){
+        if(-not $script:SelectionBoxWidth){
+            $script:SelectionBoxWidth=0.0
+            $script:SelectionBoxHeight=0.0
+            Update-TransformBoxVisual
+            $script:SelectionBoxWidth=[double]$transformBox.Width
+            $script:SelectionBoxHeight=[double]$transformBox.Height
+            $script:SelectionBoxScale=[double]$script:ModelScale
+            $script:SelectionBoxDistance=[double]$script:CameraDistance
+        }
+        $transformBox.Visibility='Visible'
+    }
+    else{$transformBox.Visibility='Collapsed';$script:SelectionBoxWidth=0.0;$script:SelectionBoxHeight=0.0}
     Update-TransformBoxVisual
 }
 
@@ -1154,6 +1328,19 @@ function Reset-View {
     if ($script:BaseCameraDistance -gt 0) { $script:CameraDistance = $script:BaseCameraDistance }
     Update-ModelTransform
     Update-Camera
+    Save-State
+}
+
+function Rotate-PropPreview([string]$axis) {
+    $key=[string]$script:CurrentPropSlot
+    if($key -notin @('p_head','p_eyes')){return}
+    $alignment=if($script:PropAlignment.ContainsKey($key)){$script:PropAlignment[$key]}else{[pscustomobject]@{Pitch=90;Yaw=180}}
+    $pitch=[double]$alignment.Pitch;$yaw=[double]$alignment.Yaw
+    if($axis -eq 'Yaw'){$yaw=($yaw+90)%360}
+    else{$pitch=($pitch+90)%360}
+    $script:PropAlignment[$key]=[pscustomobject]@{Pitch=$pitch;Yaw=$yaw}
+    Update-ModelTransform
+    Save-State
 }
 
 function Get-MeshCached([IO.FileInfo]$ydd) {
@@ -1177,11 +1364,14 @@ function Get-MeshCached([IO.FileInfo]$ydd) {
 
 function Build-Viewport([IO.FileInfo]$ydd) {
     $parsed = Get-MeshCached $ydd
+    $script:CurrentPropSlot=(Get-DetectedPieceDescriptor $ydd).Slot
+    $firstViewport = ($null -eq $script:Camera)
 
     $viewport.Children.Clear()
     $scene = New-Object Windows.Media.Media3D.Model3DGroup
 
     $ambient = New-Object Windows.Media.Media3D.AmbientLight ([Windows.Media.ColorConverter]::ConvertFromString('#B0B0B0'))
+    $script:AmbientLight=$ambient
     $key = New-Object Windows.Media.Media3D.DirectionalLight ([Windows.Media.ColorConverter]::ConvertFromString('#FFFFFF')),([Windows.Media.Media3D.Vector3D]::new(-1,1,-1))
     $fill = New-Object Windows.Media.Media3D.DirectionalLight ([Windows.Media.ColorConverter]::ConvertFromString('#777777')),([Windows.Media.Media3D.Vector3D]::new(1,-1,0.5))
     $scene.Children.Add($ambient); $scene.Children.Add($key); $scene.Children.Add($fill)
@@ -1217,20 +1407,27 @@ function Build-Viewport([IO.FileInfo]$ydd) {
     $maxDim = [Math]::Max($b.SizeX,[Math]::Max($b.SizeY,$b.SizeZ))
     if ($maxDim -lt 0.05) { $maxDim = 0.5 }
     $script:ModelExtent=$maxDim
-    $script:ModelScale=1.0; $script:ModelOffsetX=0.0; $script:ModelOffsetZ=0.0
-    $script:TransformScreenX=0.0; $script:TransformScreenY=0.0
     $script:BaseCameraDistance = $maxDim * 3.05
-    $script:CameraDistance = $script:BaseCameraDistance
-    $script:Yaw = 0.0
-    $script:Pitch = 0.0
-    $script:Roll = 0.0
-    if($transformBox){$transformBox.Visibility='Collapsed';$script:TransformBoxEnabled=$false}
+    # Trocar de peça não redefine enquadramento, escala nem orientação escolhidos.
+    if ($firstViewport) {
+        $script:CameraDistance = $script:BaseCameraDistance
+        if($script:SavedView) {
+            $v=$script:SavedView
+            $script:Yaw=[double]$v.yaw;$script:Pitch=[double]$v.pitch;$script:Roll=[double]$v.roll
+            if([double]$v.scale -gt 0){$script:ModelScale=[double]$v.scale}
+            $script:ModelOffsetX=[double]$v.offset_x;$script:ModelOffsetZ=[double]$v.offset_z
+            if([double]$v.camera_distance -gt 0){$script:CameraDistance=[double]$v.camera_distance}
+            $script:SavedView=$null
+        }
+    }
+    if($transformBox){$transformBox.Visibility='Collapsed';$script:TransformBoxEnabled=$false;$script:SelectionBoxWidth=0.0;$script:SelectionBoxHeight=0.0}
 
-    $script:Camera = New-Object Windows.Media.Media3D.PerspectiveCamera
+    if ($firstViewport) { $script:Camera = New-Object Windows.Media.Media3D.PerspectiveCamera }
     $script:Camera.FieldOfView = 36
     $viewport.Camera = $script:Camera
     Update-ModelTransform
     Update-Camera
+    Update-Lighting
     Set-NeutralMaterial
 
     $lblMesh.Text = "$($parsed.Vertices) vértices  •  $($parsed.Triangles) triângulos"
@@ -1278,7 +1475,8 @@ function Show-TexturePreview($item,$target) {
         $texturePreviewPopup.Placement=[Windows.Controls.Primitives.PlacementMode]::Right
         $texturePreviewPopup.HorizontalOffset=10
         $texturePreviewPopup.VerticalOffset=-20
-        $texturePreviewPopup.IsOpen=$true
+        # Não recria o popup enquanto o cursor continua na mesma miniatura.
+        if (-not $texturePreviewPopup.IsOpen) { $texturePreviewPopup.IsOpen=$true }
         Load-ThumbnailForItem $item
     } catch { Write-AppLog ('Preview hover: '+$_.Exception.Message) }
 }
@@ -1326,31 +1524,35 @@ function Find-TextureForGeometry($textures, [string]$name) {
     return $textures[0]
 }
 
+function Apply-TextureArray($textures) {
+    $script:MaterialBitmapCache = @{}
+    foreach ($entry in @($script:GeometryEntries)) {
+        $tex = Find-TextureForGeometry $textures $entry.DiffuseTexture
+        if ($null -eq $tex) {
+            $neutral = New-SolidMaterial '#8D8D92'
+            $entry.Model.Material = $neutral; $entry.Model.BackMaterial = $neutral; continue
+        }
+        $cacheKey = ([string]$tex.Name) + '|' + [string]$entry.RenderBucket
+        if (-not $script:MaterialBitmapCache.ContainsKey($cacheKey)) {
+            $bmp = [MtRageParser]::BitmapForRenderBucket($tex.Bitmap,[int]$entry.RenderBucket)
+            $script:MaterialBitmapCache[$cacheKey] = New-TextureMaterial $bmp
+        }
+        $mat = $script:MaterialBitmapCache[$cacheKey]
+        $entry.Model.Material = $mat; $entry.Model.BackMaterial = $mat
+    }
+    $main = if ($textures.Count -gt 0) { $textures[0] } else { $null }
+    if ($main) {
+        $fmt = Get-PixelFormatName ([uint32]$main.Format)
+        $lblTextureInfo.Text = "$($main.Width)×$($main.Height)  •  $fmt  •  $($main.Name)"
+    }
+}
+
 function Apply-TextureItem($item) {
     if ($null -eq $item -or $null -eq $item.Tag -or [string]::IsNullOrWhiteSpace([string]$item.Tag)) { return }
     $file = New-Object IO.FileInfo ([string]$item.Tag)
     try {
         $textures = @(Get-TexturesCached $file)
-        $script:MaterialBitmapCache = @{}
-        foreach ($entry in @($script:GeometryEntries)) {
-            $tex = Find-TextureForGeometry $textures $entry.DiffuseTexture
-            if ($null -eq $tex) {
-                $neutral = New-SolidMaterial '#8D8D92'
-                $entry.Model.Material = $neutral; $entry.Model.BackMaterial = $neutral; continue
-            }
-            $cacheKey = ([string]$tex.Name) + '|' + [string]$entry.RenderBucket
-            if (-not $script:MaterialBitmapCache.ContainsKey($cacheKey)) {
-                $bmp = [MtRageParser]::BitmapForRenderBucket($tex.Bitmap,[int]$entry.RenderBucket)
-                $script:MaterialBitmapCache[$cacheKey] = New-TextureMaterial $bmp
-            }
-            $mat = $script:MaterialBitmapCache[$cacheKey]
-            $entry.Model.Material = $mat; $entry.Model.BackMaterial = $mat
-        }
-        $main = if ($textures.Count -gt 0) { $textures[0] } else { $null }
-        if ($main) {
-            $fmt = Get-PixelFormatName ([uint32]$main.Format)
-            $lblTextureInfo.Text = "$($main.Width)×$($main.Height)  •  $fmt  •  $($main.Name)"
-        }
+        Apply-TextureArray $textures
     } catch {
         Write-AppLog $_.Exception.ToString(); $lblTextureInfo.Text = 'Não foi possível abrir esta YTD'; Set-NeutralMaterial
     }
@@ -1385,6 +1587,20 @@ function Populate-Textures([IO.FileInfo]$ydd) {
         $lstTextures.Items.Clear()
         $vars = @(Find-Variants $ydd)
         if ($vars.Count -eq 0) {
+            # PEDs e alguns acessórios possuem texturas embutidas no próprio YDD.
+            # Aplicamos essas texturas sem oferecê-las para exclusão individual.
+            try {
+                $embedded=@([MtRageParser]::LoadEmbeddedTextures($ydd.FullName))
+                if($embedded.Count -gt 0){
+                    Apply-TextureArray $embedded
+                    $empty=New-Object Windows.Controls.ListBoxItem
+                    $empty.Content="Texturas incorporadas ao PED ($($embedded.Count))"
+                    $empty.IsEnabled=$false
+                    [void]$lstTextures.Items.Add($empty)
+                    $lblTextureCount.Text="$($embedded.Count) TEXTURAS EMBUTIDAS"
+                    return
+                }
+            } catch { Write-AppLog ('Texturas embutidas '+$ydd.Name+': '+$_.Exception.Message) }
             $empty = New-Object Windows.Controls.ListBoxItem
             $empty.Content = 'Sem texturas associadas'
             $empty.IsEnabled = $false
@@ -1508,7 +1724,12 @@ function Toggle-TextureDelete {
     # Recria a lista para mostrar imediatamente a textura marcada/desmarcada.
     $ydd = $script:Pieces[$script:Index]
     $selectedPath = $path
-    Populate-Textures $ydd
+    try { Populate-Textures $ydd }
+    catch {
+        Write-AppLog ('Falha ao carregar texturas '+$ydd.FullName+': '+$_.Exception.ToString())
+        $lstTextures.Items.Clear();$lblTextureCount.Text='0 TEXTURAS'
+        $lblTextureInfo.Text='Não foi possível ler as texturas desta peça.'
+    }
     foreach ($it in @($lstTextures.Items)) {
         if ($it.Tag -and ([string]$it.Tag -eq $selectedPath)) { $lstTextures.SelectedItem = $it; break }
     }
@@ -1562,6 +1783,9 @@ function Load-CurrentPiece {
     $relative = $ydd.FullName.Substring($script:PackPath.Length).TrimStart('\')
     $lblPiecePath.Text = $relative
     $desc = Get-DetectedPieceDescriptor $ydd
+    $isHeadProp=($desc.Slot -in @('p_head','p_eyes'))
+    $btnPropYaw.Visibility=if($isHeadProp){'Visible'}else{'Collapsed'}
+    $btnPropPitch.Visibility=if($isHeadProp){'Visible'}else{'Collapsed'}
     $script:UpdatingPieceOptions=$true
     try {
         if($desc.Slot -eq 'berd' -or $desc.Slot -eq 'p_head'){
@@ -1584,10 +1808,22 @@ function Load-CurrentPiece {
     $btnNext.IsEnabled = ($indices.Count -gt 0 -and $pos -lt $indices.Count-1)
     $btnLast.IsEnabled = $btnNext.IsEnabled
 
-    Build-Viewport $ydd
-    Populate-Textures $ydd
+    try { Build-Viewport $ydd }
+    catch {
+        # Um drawable inválido não deve impedir a revisão das outras peças.
+        Write-AppLog ('Falha ao carregar malha '+$ydd.FullName+': '+$_.Exception.ToString())
+        $viewport.Children.Clear();$script:ModelRoot=$null;$script:ModelBounds=$null
+        $lblMesh.Text='Não foi possível visualizar esta peça (arquivo inválido ou incompatível).'
+    }
+    try { Populate-Textures $ydd }
+    catch {
+        Write-AppLog ('Falha ao carregar texturas '+$ydd.FullName+': '+$_.Exception.ToString())
+        $lstTextures.Items.Clear();$lblTextureCount.Text='0 TEXTURAS'
+        $lblTextureInfo.Text='Não foi possível ler as texturas desta peça.'
+    }
     Update-Decision
     Update-Stats
+    Save-State
 }
 
 function Go-FirstPiece {
@@ -1778,13 +2014,29 @@ function Open-Pack {
     $dlg.Description = 'Selecione a pasta stream do pack'
     if ($dlg.ShowDialog() -ne 'OK') { return }
 
+    Open-PackPath ([string]$dlg.SelectedPath)
+}
+
+function Open-PackPath([string]$selectedPath) {
+    if(-not (Test-Path -LiteralPath $selectedPath -PathType Container)){
+        Show-Error 'A pasta deste projeto não existe mais.';Refresh-RecentProjects;return
+    }
+
     $stage='INICIALIZAÇÃO'
     Set-Loading $true 'INDEXANDO O PACK...'
     try {
         Ensure-RuntimeCollections
         if($script:ThumbTimer){ try{$script:ThumbTimer.Stop()}catch{}; $script:ThumbTimer=$null }
-        $script:PackPath = [string]$dlg.SelectedPath
+        $script:PackPath = $selectedPath
         $script:Index = 0
+        $script:SavedView=$null
+        $script:PropAlignment=@{}
+        # Um pack diferente inicia com enquadramento próprio; peças do mesmo
+        # pack compartilham a vista até o usuário modificá-la manualmente.
+        $script:Camera = $null
+        $script:Yaw = 0.0; $script:Pitch = 0.0; $script:Roll = 0.0
+        $script:ModelScale = 1.0
+        $script:ModelOffsetX = 0.0; $script:ModelOffsetZ = 0.0
         $script:TextureCache=@{}
         $script:TextureInfoCache=@{}
         $script:TextureCacheOrder=@()
@@ -1813,6 +2065,8 @@ function Open-Pack {
         $lblLoading.Text='ABRINDO A PRIMEIRA PEÇA...'
         [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
         Load-CurrentPiece
+        Remember-Project $script:PackPath
+        Refresh-RecentProjects
     } catch {
         $line=$_.InvocationInfo.ScriptLineNumber
         $pos=$_.InvocationInfo.PositionMessage
@@ -2597,14 +2851,14 @@ $xamlText = @'
 
     <Grid Grid.Row="2" Name="emptyState">
         <Border Width="560" Padding="34" Background="#0D0D10" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="16" HorizontalAlignment="Center" VerticalAlignment="Center">
-            <StackPanel><Image Name="imgEmptyLogo" Width="245" Height="105" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Text="PACK ORGANIZER" FontSize="27" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,18,0,0"/><TextBlock Text="Abra a pasta stream para visualizar as roupas, revisar texturas e montar o add-on." Foreground="#8E8992" TextAlignment="Center" TextWrapping="Wrap" Margin="45,8,45,0"/><Border Background="#160A1F" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="60,20,60,0"><TextBlock Text="Tudo é processado localmente no seu computador." Foreground="#D88BFF" FontSize="10" HorizontalAlignment="Center"/></Border></StackPanel>
+            <StackPanel><Image Name="imgEmptyLogo" Width="245" Height="105" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Text="PACK ORGANIZER" FontSize="27" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,18,0,0"/><TextBlock Text="Abra a pasta stream para visualizar as roupas, revisar texturas e montar o add-on." Foreground="#8E8992" TextAlignment="Center" TextWrapping="Wrap" Margin="45,8,45,0"/><Border Background="#160A1F" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="60,20,60,0"><TextBlock Text="Tudo é processado localmente no seu computador." Foreground="#D88BFF" FontSize="10" HorizontalAlignment="Center"/></Border><TextBlock Text="MEUS PROJETOS" Foreground="#D88BFF" FontSize="11" FontWeight="Bold" Margin="0,22,0,9"/><TextBlock Name="lblNoProjects" Text="Nenhum projeto recente. Clique em ABRIR PACK para começar." Foreground="#817A89" FontSize="10"/><ListBox Name="lstRecentProjects" MaxHeight="250" ToolTip="Clique duas vezes para continuar um projeto na última peça visualizada"/></StackPanel>
         </Border>
     </Grid>
 
     <Grid Grid.Row="2" Name="mainContent" Visibility="Collapsed" Margin="18,8,18,14">
         <Grid.ColumnDefinitions><ColumnDefinition Width="342"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="#101014" CornerRadius="14" BorderBrush="#29252F" BorderThickness="1" Padding="15"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="PEÇA" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Visibility="Collapsed"/><TextBlock Name="lblMesh" Foreground="#77717D" FontSize="9" Margin="0,5,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C174F0" FontSize="8.5" FontWeight="SemiBold" Margin="0,7,0,0"/></StackPanel>
+            <StackPanel><TextBlock Text="PEÇA" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Visibility="Collapsed"/><TextBlock Name="lblMesh" Foreground="#77717D" FontSize="9" Margin="0,5,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C174F0" FontSize="8.5" FontWeight="SemiBold" Margin="0,7,0,0"/><StackPanel Orientation="Horizontal" Margin="0,7,0,0"><Button Name="btnPropYaw" Content="GIRAR ACESSÓRIO ↻" Visibility="Collapsed" Height="28" FontSize="9" Margin="0,0,6,0" ToolTip="Gira o acessório 90 graus sem alterar o arquivo"/><Button Name="btnPropPitch" Content="COLOCAR EM PÉ" Visibility="Collapsed" Height="28" FontSize="9" ToolTip="Alterna a inclinação do acessório"/></StackPanel></StackPanel>
             <StackPanel Grid.Row="1" Margin="0,14,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnPrev" Content="‹  ANTERIOR" Height="39" Margin="0,0,5,0"/><Button Name="btnNext" Grid.Column="1" Content="PRÓXIMA  ›" Height="39" Margin="5,0,0,0"/></Grid><Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnFirst" Content="INÍCIO" Height="34" FontSize="11" FontWeight="Bold" Margin="0,0,5,0"/><Button Name="btnLast" Grid.Column="1" Content="FIM" Height="34" FontSize="11" FontWeight="Bold" Margin="5,0,0,0"/></Grid></StackPanel>
             <Border Grid.Row="2" Background="#0C0C10" BorderBrush="#29252F" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,11,0,0">
                 <StackPanel>
@@ -2621,6 +2875,7 @@ $xamlText = @'
 
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
+            <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="12,8" CornerRadius="8" Background="#D0141417"><StackPanel Orientation="Horizontal"><TextBlock Text="LUZ" Foreground="#D88BFF" FontWeight="Bold" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/><Slider Name="sliderLight" Width="130" Minimum="0" Maximum="100" Value="50" ToolTip="Intensidade da iluminação ambiente"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
                 <Border BorderBrush="#B16BE0" BorderThickness="1.25" Opacity="0.96"/>
                 <Rectangle Name="rotNW" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0" Cursor="Hand" ToolTip="Rotacionar"/>
@@ -2650,7 +2905,7 @@ $xamlText = @'
         </StackPanel></ScrollViewer></Border>
     </Grid>
 
-    <Popup Name="texturePreviewPopup" AllowsTransparency="True" StaysOpen="False" Placement="Right" PopupAnimation="Fade"><Border Width="360" Background="#111114" BorderBrush="#A320FF" BorderThickness="1" CornerRadius="12" Padding="12"><StackPanel><TextBlock Name="lblTexturePreviewName" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Name="lblTexturePreviewMeta" Foreground="#8E8992" FontSize="9" Margin="0,3,0,9"/><Border Width="334" Height="334" Background="#09090B" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="7"><Image Name="imgTexturePreview" Stretch="Uniform" Margin="6"/></Border></StackPanel></Border></Popup>
+    <Popup Name="texturePreviewPopup" AllowsTransparency="True" StaysOpen="True" IsHitTestVisible="False" Placement="Right" PopupAnimation="None"><Border Width="360" Background="#111114" BorderBrush="#A320FF" BorderThickness="1" CornerRadius="12" Padding="12"><StackPanel><TextBlock Name="lblTexturePreviewName" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Name="lblTexturePreviewMeta" Foreground="#8E8992" FontSize="9" Margin="0,3,0,9"/><Border Width="334" Height="334" Background="#09090B" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="7"><Image Name="imgTexturePreview" Stretch="Uniform" Margin="6"/></Border></StackPanel></Border></Popup>
 
     <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#E6000000" Panel.ZIndex="99"><Border Width="390" Padding="26" Background="#111114" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="14" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel><Image Name="imgLoadingLogo" Width="175" Height="78" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,16,0,10"/><ProgressBar Height="5" IsIndeterminate="True" Foreground="#A320FF" Background="#242429"/><TextBlock Text="O visualizador abre assim que o índice local estiver pronto." Foreground="#8E8992" FontSize="9" HorizontalAlignment="Center" Margin="0,9,0,0"/></StackPanel></Border></Border>
 
@@ -2678,8 +2933,8 @@ try {
 
 foreach($n in @(
     'btnOpen','btnUpdate','lblPackName','lblPackPath','emptyState','mainContent',
-    'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','sliderLight','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -2690,19 +2945,22 @@ $script:Pieces = @()
 $script:Decisions = @{}
 $script:TextureDeletions = @{}
 $script:Index = 0
+$script:SavedView=$null
 $script:TextureCache = @{}
 $script:TextureCacheOrder = @()
 $script:TextureInfoCache = @{}
 $script:VariantIndex = @{}
 $script:CategoryOverrides = @{}
 $script:HideHairSelections = @{}
+$script:PropAlignment=@{}
+$script:CurrentPropSlot=''
 $script:UpdatingPieceOptions = $false
 $script:MeshCache = @{}
 $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.23'
+$script:AppVersion = '0.9.24'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -2785,6 +3043,16 @@ public static class MtNativeWindow {
 } catch { Write-AppLog ('Logo/assets: '+$_.Exception.Message) }
 
 $btnOpen.Add_Click({ Invoke-Safe { Open-Pack } })
+$btnPropYaw.Add_Click({ Invoke-Safe { Rotate-PropPreview 'Yaw' } })
+$btnPropPitch.Add_Click({ Invoke-Safe { Rotate-PropPreview 'Pitch' } })
+$sliderLight.Add_ValueChanged({ Update-Lighting })
+$lstRecentProjects.Add_MouseDoubleClick({
+    if($lstRecentProjects.SelectedItem){
+        $path=[string]$lstRecentProjects.SelectedItem.Tag
+        Invoke-Safe { Open-PackPath $path }
+    }
+})
+Refresh-RecentProjects
 $btnUpdate.Add_Click({ Invoke-Safe { Confirm-And-InstallUpdate } })
 $btnPrev.Add_Click({ Invoke-Safe { Navigate-Piece -1 } })
 $script:CategoryItems=@(
@@ -2838,6 +3106,8 @@ $lstTextures.Add_SelectionChanged({
 function Start-TransformDrag([string]$mode,$e) {
     if(-not $script:ModelRoot){return}
     $script:TransformDragMode=$mode
+    $script:TransformDragBoxWidth=[double]$transformBox.Width
+    $script:TransformDragBoxHeight=[double]$transformBox.Height
     $script:TransformStart=$e.GetPosition($viewHost)
     $script:TransformStartScale=$script:ModelScale
     $script:TransformStartX=$script:ModelOffsetX
@@ -2854,7 +3124,7 @@ function Start-TransformDrag([string]$mode,$e) {
 $transformBox.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE' $e})
 foreach($h in @($rotLeft,$rotRight)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e}) }
 foreach($h in @($rotTop,$rotBottom)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e}) }
-foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e}) }
+foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'SCALE' $e}) }
 $gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e})
 $gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
 $gizmoRoll.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
@@ -2940,9 +3210,12 @@ $viewHost.Add_MouseMove({
 
 $viewHost.Add_MouseLeftButtonUp({
     Invoke-Safe {
+        $changed=($script:TransformDragMode -or $script:Dragging)
         if($script:TransformDragMode){$script:TransformDragMode=$null}
+        $script:TransformDragBoxWidth=0.0;$script:TransformDragBoxHeight=0.0
         if ($script:Dragging) {$script:Dragging = $false}
         if ($viewHost.IsMouseCaptured) { $viewHost.ReleaseMouseCapture() }
+        if($changed){Save-State}
     }
 })
 
@@ -2957,6 +3230,7 @@ $viewHost.Add_MouseWheel({
         )
         Update-Camera
         Update-TransformBoxVisual
+        Save-State
         $e.Handled = $true
     }
 })
@@ -2981,5 +3255,29 @@ $win.Add_KeyDown({
     }
 })
 
+if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
+    # Exercita também XamlReader.Load, bindings, handlers e montagem real do WPF.
+    # Não abre pack nem realiza atualização de produção.
+    $win.Show()
+    [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+    $fixture=Join-Path ([IO.Path]::GetTempPath()) ('MTPO_UI_TEST_'+[Guid]::NewGuid().ToString('N'))
+    try {
+        [void](New-Item -ItemType Directory -Path $fixture -Force)
+        [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_000_u.ydd'),[byte[]](1,2,3,4))
+        [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_001_u.ydd'),[byte[]](1,2,3,4))
+        Open-PackPath $fixture
+        if($script:Pieces.Count -ne 2){throw 'O projeto de teste não indexou as duas peças.'}
+        Navigate-Piece 1
+        if($script:Index -ne 1){throw 'O projeto de teste não navegou após YDD inválida.'}
+        if(-not (Test-Path -LiteralPath (Get-StatePath))){throw 'O projeto de teste não salvou seu estado.'}
+        $saved=Get-Content -LiteralPath (Get-StatePath) -Raw | ConvertFrom-Json
+        if([int]$saved.index -ne 1){throw 'O projeto de teste não atualizou o índice salvo.'}
+    } finally {
+        $win.Close()
+        if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
+    }
+    Write-Host 'MT_PACK_ORGANIZER_UI_SELFTEST_OK'
+    exit 0
+}
 Start-SilentUpdateCheck
 $win.ShowDialog() | Out-Null

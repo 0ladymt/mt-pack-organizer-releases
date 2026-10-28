@@ -1,0 +1,44 @@
+name: Validar alterações do Pack Organizer
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - '.github/workflows/validate-development.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-selftest:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verificar sintaxe PowerShell e interface XAML
+        shell: pwsh
+        run: |
+          $file='src/MT_Pack_Organizer.ps1'
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors | Format-List | Out-String | Write-Host; throw 'Erro de sintaxe PowerShell'}
+          $source=Get-Content -LiteralPath $file -Raw
+          $match=[regex]::Match($source,"(?s)\`$xamlText\s*=\s*@'\r?\n(.*?)\r?\n'@")
+          if(-not $match.Success){throw 'XAML não encontrada'}
+          [xml]$markup=$match.Groups[1].Value
+          Write-Host "XAML válido: $($markup.DocumentElement.Name)"
+      - name: Teste interno de carregamento e gerador YMT
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src/assets | Out-Null
+          [IO.File]::WriteAllBytes('src/assets/mt_logo.png',[Convert]::FromBase64String((Get-Content -Raw src/assets/mt_logo_official_ui.b64).Trim()))
+          $env:MT_PACK_ORGANIZER_SELFTEST='1'
+          $env:MT_PACK_ORGANIZER_FORCE_NUGET_NETSTANDARD='1'
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File src/MT_Pack_Organizer.ps1
+          if($LASTEXITCODE -ne 0){throw "Self-test falhou com código $LASTEXITCODE"}
+      - name: Teste de inicialização da interface Windows
+        shell: pwsh
+        run: |
+          $env:MT_PACK_ORGANIZER_UITEST='1'
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File src/MT_Pack_Organizer.ps1
+          if($LASTEXITCODE -ne 0){throw "Interface WPF falhou com código $LASTEXITCODE"}
