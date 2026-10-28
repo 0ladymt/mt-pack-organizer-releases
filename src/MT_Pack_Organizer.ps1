@@ -908,6 +908,7 @@ function Save-State {
             scale=$script:ModelScale; offset_x=$script:ModelOffsetX; offset_z=$script:ModelOffsetZ
             camera_distance=$script:CameraDistance
         }
+        prop_alignment = $script:PropAlignment
         decisions = $script:Decisions
         texture_deletions = @($script:TextureDeletions.Keys)
         category_overrides = $script:CategoryOverrides
@@ -951,6 +952,7 @@ function Load-State {
             if ($o.view) {
                 $script:SavedView=$o.view
             }
+            if($o.prop_alignment){foreach($p in $o.prop_alignment.PSObject.Properties){$script:PropAlignment[$p.Name]=$p.Value}}
             if ($o.addon_name) { $script:AddonNameSaved = [string]$o.addon_name }
         } catch { Write-AppLog "Estado anterior não pôde ser lido: $($_.Exception.Message)" }
     }
@@ -1196,6 +1198,17 @@ function Update-ModelTransform {
     $g.Children.Add((New-Object Windows.Media.Media3D.TranslateTransform3D (-$script:CenterX),(-$script:CenterY),(-$script:CenterZ)))
     $g.Children.Add((New-Object Windows.Media.Media3D.ScaleTransform3D $script:ModelScale,$script:ModelScale,$script:ModelScale))
 
+    # Props da cabeça usam coordenadas locais diferentes das roupas do PED.
+    # A orientação é aplicada só à prévia, nunca aos arquivos originais.
+    if($script:CurrentPropSlot -in @('p_head','p_eyes')){
+        $key=[string]$script:CurrentPropSlot
+        $alignment=if($script:PropAlignment.ContainsKey($key)){$script:PropAlignment[$key]}else{[pscustomobject]@{Pitch=90;Yaw=180}}
+        $basePitch=New-Object Windows.Media.Media3D.AxisAngleRotation3D ([Windows.Media.Media3D.Vector3D]::new(1,0,0)),([double]$alignment.Pitch)
+        $baseYaw=New-Object Windows.Media.Media3D.AxisAngleRotation3D ([Windows.Media.Media3D.Vector3D]::new(0,0,1)),([double]$alignment.Yaw)
+        $g.Children.Add((New-Object Windows.Media.Media3D.RotateTransform3D $basePitch))
+        $g.Children.Add((New-Object Windows.Media.Media3D.RotateTransform3D $baseYaw))
+    }
+
     $pitch = New-Object Windows.Media.Media3D.AxisAngleRotation3D ([Windows.Media.Media3D.Vector3D]::new(1,0,0)),$script:Pitch
     $yaw = New-Object Windows.Media.Media3D.AxisAngleRotation3D ([Windows.Media.Media3D.Vector3D]::new(0,0,1)),$script:Yaw
     $g.Children.Add((New-Object Windows.Media.Media3D.RotateTransform3D $pitch))
@@ -1312,6 +1325,18 @@ function Reset-View {
     Save-State
 }
 
+function Rotate-PropPreview([string]$axis) {
+    $key=[string]$script:CurrentPropSlot
+    if($key -notin @('p_head','p_eyes')){return}
+    $alignment=if($script:PropAlignment.ContainsKey($key)){$script:PropAlignment[$key]}else{[pscustomobject]@{Pitch=90;Yaw=180}}
+    $pitch=[double]$alignment.Pitch;$yaw=[double]$alignment.Yaw
+    if($axis -eq 'Yaw'){$yaw=($yaw+90)%360}
+    else{$pitch=($pitch+90)%360}
+    $script:PropAlignment[$key]=[pscustomobject]@{Pitch=$pitch;Yaw=$yaw}
+    Update-ModelTransform
+    Save-State
+}
+
 function Get-MeshCached([IO.FileInfo]$ydd) {
     Ensure-RuntimeCollections
     $key=[string]$ydd.FullName
@@ -1333,6 +1358,7 @@ function Get-MeshCached([IO.FileInfo]$ydd) {
 
 function Build-Viewport([IO.FileInfo]$ydd) {
     $parsed = Get-MeshCached $ydd
+    $script:CurrentPropSlot=(Get-DetectedPieceDescriptor $ydd).Slot
     $firstViewport = ($null -eq $script:Camera)
 
     $viewport.Children.Clear()
@@ -1751,6 +1777,9 @@ function Load-CurrentPiece {
     $relative = $ydd.FullName.Substring($script:PackPath.Length).TrimStart('\')
     $lblPiecePath.Text = $relative
     $desc = Get-DetectedPieceDescriptor $ydd
+    $isHeadProp=($desc.Slot -in @('p_head','p_eyes'))
+    $btnPropYaw.Visibility=if($isHeadProp){'Visible'}else{'Collapsed'}
+    $btnPropPitch.Visibility=if($isHeadProp){'Visible'}else{'Collapsed'}
     $script:UpdatingPieceOptions=$true
     try {
         if($desc.Slot -eq 'berd' -or $desc.Slot -eq 'p_head'){
@@ -1995,6 +2024,7 @@ function Open-PackPath([string]$selectedPath) {
         $script:PackPath = $selectedPath
         $script:Index = 0
         $script:SavedView=$null
+        $script:PropAlignment=@{}
         # Um pack diferente inicia com enquadramento próprio; peças do mesmo
         # pack compartilham a vista até o usuário modificá-la manualmente.
         $script:Camera = $null
@@ -2822,7 +2852,7 @@ $xamlText = @'
     <Grid Grid.Row="2" Name="mainContent" Visibility="Collapsed" Margin="18,8,18,14">
         <Grid.ColumnDefinitions><ColumnDefinition Width="342"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="#101014" CornerRadius="14" BorderBrush="#29252F" BorderThickness="1" Padding="15"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="PEÇA" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Visibility="Collapsed"/><TextBlock Name="lblMesh" Foreground="#77717D" FontSize="9" Margin="0,5,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C174F0" FontSize="8.5" FontWeight="SemiBold" Margin="0,7,0,0"/></StackPanel>
+            <StackPanel><TextBlock Text="PEÇA" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Visibility="Collapsed"/><TextBlock Name="lblMesh" Foreground="#77717D" FontSize="9" Margin="0,5,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C174F0" FontSize="8.5" FontWeight="SemiBold" Margin="0,7,0,0"/><StackPanel Orientation="Horizontal" Margin="0,7,0,0"><Button Name="btnPropYaw" Content="GIRAR ACESSÓRIO ↻" Visibility="Collapsed" Height="28" FontSize="9" Margin="0,0,6,0" ToolTip="Gira o acessório 90 graus sem alterar o arquivo"/><Button Name="btnPropPitch" Content="COLOCAR EM PÉ" Visibility="Collapsed" Height="28" FontSize="9" ToolTip="Alterna a inclinação do acessório"/></StackPanel></StackPanel>
             <StackPanel Grid.Row="1" Margin="0,14,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnPrev" Content="‹  ANTERIOR" Height="39" Margin="0,0,5,0"/><Button Name="btnNext" Grid.Column="1" Content="PRÓXIMA  ›" Height="39" Margin="5,0,0,0"/></Grid><Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnFirst" Content="INÍCIO" Height="34" FontSize="11" FontWeight="Bold" Margin="0,0,5,0"/><Button Name="btnLast" Grid.Column="1" Content="FIM" Height="34" FontSize="11" FontWeight="Bold" Margin="5,0,0,0"/></Grid></StackPanel>
             <Border Grid.Row="2" Background="#0C0C10" BorderBrush="#29252F" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,11,0,0">
                 <StackPanel>
@@ -2897,7 +2927,7 @@ try {
 
 foreach($n in @(
     'btnOpen','btnUpdate','lblPackName','lblPackPath','emptyState','mainContent',
-    'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects',
+    'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','sliderLight','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
@@ -2916,13 +2946,15 @@ $script:TextureInfoCache = @{}
 $script:VariantIndex = @{}
 $script:CategoryOverrides = @{}
 $script:HideHairSelections = @{}
+$script:PropAlignment=@{}
+$script:CurrentPropSlot=''
 $script:UpdatingPieceOptions = $false
 $script:MeshCache = @{}
 $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.23'
+$script:AppVersion = '0.9.24'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3005,6 +3037,8 @@ public static class MtNativeWindow {
 } catch { Write-AppLog ('Logo/assets: '+$_.Exception.Message) }
 
 $btnOpen.Add_Click({ Invoke-Safe { Open-Pack } })
+$btnPropYaw.Add_Click({ Invoke-Safe { Rotate-PropPreview 'Yaw' } })
+$btnPropPitch.Add_Click({ Invoke-Safe { Rotate-PropPreview 'Pitch' } })
 $sliderLight.Add_ValueChanged({ Update-Lighting })
 $lstRecentProjects.Add_MouseDoubleClick({
     if($lstRecentProjects.SelectedItem){
