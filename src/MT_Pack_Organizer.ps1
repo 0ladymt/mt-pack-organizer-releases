@@ -996,6 +996,22 @@ function New-ModalButton([string]$label,[bool]$primary=$false,[bool]$danger=$fal
     return $button
 }
 
+function Save-ModalPreview([Windows.Window]$dialog,[string]$kind) {
+    if($env:MT_PACK_ORGANIZER_UITEST -ne '1' -or -not $env:MT_PACK_ORGANIZER_SCREENSHOT){return}
+    try {
+        $dialog.UpdateLayout()
+        $w=[int]$dialog.ActualWidth;$h=[int]$dialog.ActualHeight
+        if($w -lt 30 -or $h -lt 30){return}
+        $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap $w,$h,96,96,([Windows.Media.PixelFormats]::Pbgra32)
+        $bitmap.Render($dialog)
+        $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder
+        $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+        $dest=$env:MT_PACK_ORGANIZER_SCREENSHOT.Replace('.png',('-'+$kind+'.png'))
+        $out=[IO.File]::Create($dest)
+        try{$encoder.Save($out)}finally{$out.Dispose()}
+    } catch { Write-AppLog ('Captura modal: '+$_.Exception.Message) }
+}
+
 function Confirm-RemoveProject([string]$name,[string]$path) {
     $modal=New-ProjectModal 'Excluir projeto?' 'Esta ação remove o projeto da sua página inicial.' 535 330
     $dialog=$modal.Window
@@ -1019,7 +1035,10 @@ function Confirm-RemoveProject([string]$name,[string]$path) {
     $cancel.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
     $remove.Add_Click({$dialog.DialogResult=$true}.GetNewClosure())
     if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
-        [void]$dialog.Dispatcher.BeginInvoke([Action]{ $cancel.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
+        [void]$dialog.Dispatcher.BeginInvoke([Action]{
+            Save-ModalPreview $dialog 'excluir'
+            $cancel.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+        }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
     }
     return ($dialog.ShowDialog() -eq $true)
 }
@@ -1064,6 +1083,7 @@ function Prompt-ProjectName([string]$current) {
     $projectNameInput.SelectAll();$projectNameInput.Focus() | Out-Null
     if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         [void]$dialog.Dispatcher.BeginInvoke([Action]{
+            Save-ModalPreview $dialog 'renomear'
             $projectNameInput.Text='Projeto nomeado no teste'
             $confirm.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
         }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
@@ -2387,6 +2407,7 @@ function Select-PackFolder {
     if(Test-Path -LiteralPath $initial -PathType Container){& $refresh $initial}else{& $refresh ''}
     if($env:MT_PACK_ORGANIZER_UITEST -eq '1' -and $env:MT_PACK_ORGANIZER_PICKER_TEST_PATH){
         [void]$dialog.Dispatcher.BeginInvoke([Action]{
+            Save-ModalPreview $dialog 'abrir'
             $pathBox.Text=$env:MT_PACK_ORGANIZER_PICKER_TEST_PATH
             $select.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
         }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
