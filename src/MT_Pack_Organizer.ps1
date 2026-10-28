@@ -949,6 +949,12 @@ function New-ProjectModal([string]$heading,[string]$description,[int]$width=500,
     $dialog.WindowStyle='None';$dialog.ResizeMode='NoResize'
     $dialog.AllowsTransparency=$true;$dialog.Background=[Windows.Media.Brushes]::Transparent
     $dialog.ShowInTaskbar=$false;$dialog.WindowStartupLocation='CenterOwner';$dialog.Owner=$win
+    # Uma janela WPF separada não herda os estilos de controles da janela principal.
+    # Compartilhe os estilos de rolagem e use botões tematizados abaixo.
+    try {
+        $scrollStyle=$win.TryFindResource([Windows.Controls.Primitives.ScrollBar])
+        if($scrollStyle){$dialog.Resources.Add([Windows.Controls.Primitives.ScrollBar],$scrollStyle)}
+    } catch {Write-AppLog ('Estilo de rolagem do modal: '+$_.Exception.Message)}
     $frame=New-Object Windows.Controls.Border
     $frame.Background=New-SolidBrush '#111116';$frame.BorderBrush=New-SolidBrush '#5B3270'
     $frame.BorderThickness='1';$frame.CornerRadius='16';$frame.Padding='24'
@@ -964,8 +970,9 @@ function New-ProjectModal([string]$heading,[string]$description,[int]$width=500,
     $header.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition -Property @{Width=[Windows.GridLength]::Auto}))
     $title=New-Object Windows.Controls.TextBlock
     $title.Text=$heading;$title.Foreground=New-SolidBrush '#FFFFFF';$title.FontSize=21;$title.FontWeight='Bold';$title.VerticalAlignment='Center'
-    $close=New-Object Windows.Controls.Button
+    $close=New-ModalButton '✕'
     $close.Content='✕';$close.Width=32;$close.Height=32;$close.FontSize=13
+    $close.Margin='0'
     $close.Background=New-SolidBrush '#231D28';$close.Foreground=New-SolidBrush '#C2B9C8'
     $close.BorderBrush=New-SolidBrush '#3A3040';$close.Cursor='Hand'
     [Windows.Controls.Grid]::SetColumn($close,1)
@@ -985,19 +992,50 @@ function New-ProjectModal([string]$heading,[string]$description,[int]$width=500,
     return [pscustomobject]@{Window=$dialog;Content=$content;Footer=$footer;Close=$close}
 }
 
+function Show-ProjectModal([Windows.Window]$dialog) {
+    # Blur apenas no conteúdo da janela principal; o modal permanece nítido.
+    $root=$win.Content
+    $previousEffect=$root.Effect
+    try {
+        $blur=New-Object Windows.Media.Effects.BlurEffect
+        $blur.Radius=10;$blur.KernelType='Gaussian'
+        $root.Effect=$blur
+        return $dialog.ShowDialog()
+    } finally {
+        $root.Effect=$previousEffect
+    }
+}
+
 function New-ModalButton([string]$label,[bool]$primary=$false,[bool]$danger=$false) {
     $button=New-Object Windows.Controls.Button
     $button.Content=$label;$button.Width=137;$button.Height=40;$button.Margin='9,0,0,0'
     $button.FontSize=11;$button.FontWeight='SemiBold';$button.Cursor='Hand'
     $button.Foreground=New-SolidBrush '#FFFFFF'
-    if($danger){$button.Background=New-SolidBrush '#8A2941';$button.BorderBrush=New-SolidBrush '#C0546D'}
-    elseif($primary){$button.Background=New-SolidBrush '#A432DC';$button.BorderBrush=New-SolidBrush '#C069EE'}
-    else{$button.Background=New-SolidBrush '#28242E';$button.BorderBrush=New-SolidBrush '#45404D'}
+    if($danger){$normal='#8A2941';$hover='#A43854';$border='#C0546D'}
+    elseif($primary){$normal='#A432DC';$hover='#B54BE8';$border='#C069EE'}
+    else{$normal='#28242E';$hover='#37303F';$border='#45404D'}
+    $button.Background=New-SolidBrush $normal;$button.BorderBrush=New-SolidBrush $border
+    # ControlTemplate explícito impede o hover azul do tema do Windows.
+    $button.Template=[Windows.Markup.XamlReader]::Parse(@"
+<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="Button">
+  <Border x:Name="surface" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="$normal" BorderBrush="$border" BorderThickness="1" CornerRadius="8">
+    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+  </Border>
+  <ControlTemplate.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="surface" Property="Background" Value="$hover"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter TargetName="surface" Property="Opacity" Value="0.82"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="surface" Property="Opacity" Value="0.45"/></Trigger>
+  </ControlTemplate.Triggers>
+</ControlTemplate>
+"@)
     return $button
 }
 
 function Save-ModalPreview([Windows.Window]$dialog,[string]$kind) {
     if($env:MT_PACK_ORGANIZER_UITEST -ne '1' -or -not $env:MT_PACK_ORGANIZER_SCREENSHOT){return}
+    if(-not ($win.Content.Effect -is [Windows.Media.Effects.BlurEffect])){
+        throw 'O fundo da janela principal não foi desfocado ao abrir o menu.'
+    }
     try {
         $dialog.UpdateLayout()
         $w=[int]$dialog.ActualWidth;$h=[int]$dialog.ActualHeight
@@ -1040,7 +1078,7 @@ function Confirm-RemoveProject([string]$name,[string]$path) {
             $cancel.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
         }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
     }
-    return ($dialog.ShowDialog() -eq $true)
+    return ((Show-ProjectModal $dialog) -eq $true)
 }
 
 function Get-SavedProjectInfo([string]$path) {
@@ -1088,7 +1126,7 @@ function Prompt-ProjectName([string]$current) {
             $confirm.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
         }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
     }
-    if($dialog.ShowDialog() -eq $true){return $projectNameInput.Text.Trim()}
+    if((Show-ProjectModal $dialog) -eq $true){return $projectNameInput.Text.Trim()}
     return $null
 }
 
@@ -2213,11 +2251,11 @@ function Set-Loading([bool]$show,[string]$message='Preparando pack...') {
     if($show){
         $lblLoading.Text=$message
         $loadingOverlay.Visibility='Visible'
-        $btnOpen.IsEnabled=$false
+        $btnNewProject.IsEnabled=$false
         [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
     } else {
         $loadingOverlay.Visibility='Collapsed'
-        $btnOpen.IsEnabled=$true
+        $btnNewProject.IsEnabled=$true
     }
 }
 
@@ -2412,7 +2450,7 @@ function Select-PackFolder {
             $select.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
         }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
     }
-    if($dialog.ShowDialog() -eq $true){return [string]$state.Chosen}
+    if((Show-ProjectModal $dialog) -eq $true){return [string]$state.Chosen}
     return $null
 }
 
@@ -3252,9 +3290,7 @@ $xamlText = @'
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
             <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.0.0" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓" Width="28" Height="42" Margin="0,0,7,0" Padding="0" FontSize="24" FontWeight="Bold" Visibility="Collapsed" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" Foreground="#B52BFF" ToolTip="Atualização disponível">
-    <Button.Template><ControlTemplate TargetType="Button"><Grid Background="Transparent"><TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" FontWeight="{TemplateBinding FontWeight}" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock.Effect><DropShadowEffect Color="#A320FF" BlurRadius="7" ShadowDepth="0" Opacity="0.55"/></TextBlock.Effect></TextBlock></Grid><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="#E3A6FF"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.72"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
-</Button><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Path Width="20" Height="20" Stretch="Uniform" Fill="#D88BFF" Data="M 12,2 L 2,11 L 5,11 L 5,21 L 10,21 L 10,15 L 14,15 L 14,21 L 19,21 L 19,11 L 22,11 Z"/></Button><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Meus projetos" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓  ATUALIZAR" Width="114" Height="38" Margin="0,0,10,0" Padding="9,0" FontSize="11" FontWeight="Bold" Visibility="Collapsed" Background="#291333" BorderBrush="#8642AB" Foreground="#E9C3FF" ToolTip="Nova versão disponível para instalar"/><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Path Width="20" Height="20" Stretch="Uniform" Fill="#D88BFF" Data="M 12,2 L 2,11 L 5,11 L 5,21 L 10,21 L 10,15 L 14,15 L 14,21 L 19,21 L 19,11 L 22,11 Z"/></Button></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
     </Border>
@@ -3361,7 +3397,7 @@ try {
 }
 
 foreach($n in @(
-    'btnOpen','btnUpdate','btnHome','btnNewProject','lblHomeProjects','lblPackName','lblPackPath','emptyState','mainContent',
+    'btnUpdate','btnHome','btnNewProject','lblHomeProjects','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','axisX','axisXHead','axisZ','axisZHead','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
@@ -3391,7 +3427,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.27'
+$script:AppVersion = '0.9.28'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3519,7 +3555,6 @@ public static class MtTaskbarIdentity {
     })
 } catch { Write-AppLog ('Logo/assets: '+$_.Exception.Message) }
 
-$btnOpen.Add_Click({ Invoke-Safe { Open-Pack } })
 $btnNewProject.Add_Click({ Invoke-Safe { Open-Pack } })
 $btnHome.Add_Click({ Invoke-Safe { Go-Home } })
 $btnPropYaw.Add_Click({ Invoke-Safe { Rotate-PropPreview 'Yaw' } })
