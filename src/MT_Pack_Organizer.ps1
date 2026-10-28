@@ -1003,6 +1003,11 @@ function Show-ProjectModal([Windows.Window]$dialog) {
         return $dialog.ShowDialog()
     } finally {
         $root.Effect=$previousEffect
+        # O diálogo fecha antes de qualquer operação de indexação/carregamento.
+        # Atualize a composição para não deixar o efeito anterior no frame seguinte.
+        if($win.Dispatcher.CheckAccess()){
+            [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+        }
     }
 }
 
@@ -1209,7 +1214,8 @@ function Go-Home {
     $mainContent.Visibility='Collapsed'
     $emptyState.Visibility='Visible'
     $btnHome.Visibility='Collapsed'
-    $lblPackName.Text='Meus projetos'
+    $packHeaderInfo.Visibility='Collapsed'
+    $lblPackName.Text=''
     $lblPackPath.Text=''
     Refresh-RecentProjects
 }
@@ -2293,6 +2299,9 @@ function Undo-Last {
 function Set-Loading([bool]$show,[string]$message='Preparando pack...') {
     if($null -eq $loadingOverlay){return}
     if($show){
+        # A transição de modal para carregamento não deve herdar o desfoque.
+        # O overlay de carregamento já tem o próprio fundo escurecido.
+        $win.Content.Effect=$null
         $lblLoading.Text=$message
         $loadingOverlay.Visibility='Visible'
         $btnNewProject.IsEnabled=$false
@@ -2548,6 +2557,7 @@ function Open-PackPath([string]$selectedPath) {
         $stage='ATUALIZANDO INTERFACE'
         $lblPackName.Text = [string]$script:ProjectName
         $lblPackPath.Text = [string]$script:PackPath
+        $packHeaderInfo.Visibility='Visible'
         if($script:AddonNameSaved){$txtAddonName.Text=Convert-ToAddonName ([string]$script:AddonNameSaved)}else{$txtAddonName.Text=Get-DefaultAddonName}
         $emptyState.Visibility = 'Collapsed'
         $mainContent.Visibility = 'Visible'
@@ -3334,7 +3344,7 @@ $xamlText = @'
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
             <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.0.0" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Meus projetos" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓  ATUALIZAR" Width="114" Height="38" Margin="0,0,10,0" Padding="9,0" FontSize="11" FontWeight="Bold" Visibility="Collapsed" Background="#291333" BorderBrush="#8642AB" Foreground="#E9C3FF" ToolTip="Nova versão disponível para instalar"/><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Path Width="20" Height="20" Stretch="Uniform" Fill="#D88BFF" Data="M 12,2 L 2,11 L 5,11 L 5,21 L 10,21 L 10,15 L 14,15 L 14,21 L 19,21 L 19,11 L 22,11 Z"/></Button></StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Name="packHeaderInfo" Visibility="Collapsed" Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓  ATUALIZAR" Width="114" Height="38" Margin="0,0,10,0" Padding="9,0" FontSize="11" FontWeight="Bold" Visibility="Collapsed" Background="#291333" BorderBrush="#8642AB" Foreground="#E9C3FF" ToolTip="Nova versão disponível para instalar"/><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Path Width="20" Height="20" Stretch="Uniform" Fill="#D88BFF" Data="M 12,2 L 2,11 L 5,11 L 5,21 L 10,21 L 10,15 L 14,15 L 14,21 L 19,21 L 19,11 L 22,11 Z"/></Button></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
     </Border>
@@ -3444,7 +3454,7 @@ try {
 }
 
 foreach($n in @(
-    'btnUpdate','btnHome','btnNewProject','lblHomeProjects','lblPackName','lblPackPath','emptyState','mainContent',
+    'btnUpdate','btnHome','btnNewProject','lblHomeProjects','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','axisX','axisXHead','axisY','axisYHead','axisZ','axisZHead','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
@@ -3474,7 +3484,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.29'
+$script:AppVersion = '0.9.30'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3874,6 +3884,10 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
     if((Prompt-ProjectName 'Nome inicial') -ne 'Projeto nomeado no teste'){
         throw 'A janela de nome do projeto não confirmou SALVAR.'
     }
+    Set-Loading $true 'ABRINDO PROJETO...'
+    if($null -ne $win.Content.Effect){throw 'A tela de carregamento continuou desfocada após o modal.'}
+    Set-Loading $false
+    if($packHeaderInfo.Visibility -ne 'Collapsed'){throw 'O cabeçalho do início não deveria exibir o nome dos projetos.'}
     $fixture=Join-Path ([IO.Path]::GetTempPath()) ('MTPO_UI_TEST_'+[Guid]::NewGuid().ToString('N'))
     $legacyFixture=$fixture+'_legacy'
     try {
