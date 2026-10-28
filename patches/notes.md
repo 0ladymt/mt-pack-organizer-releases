@@ -25,3 +25,11 @@ MT Pack Organizer 0.9.25
 - Renomear projeto: janela sem barra branca do Windows, campo destacado e botão SALVAR NOME.
 - Testes automáticos de abrir pasta, confirmar nome e cancelar exclusão.
 
+# MT Pack Organizer 0.9.28
+
+- Fundo do app desfocado automaticamente durante os menus Abrir projeto, Renomear e Excluir, restaurado ao fechar.
+- Botões dos menus usam hover roxo, vinho ou cinza escuro, sem o azul do Windows; rolagem assume o estilo do aplicativo.
+- Cabeçalho simplificado: removido ABRIR PACK redundante; novos projetos continuam pelo botão + NOVO PROJETO.
+- Aviso de atualização transformado em botão ATUALIZAR com contraste e alinhamento próprios.
+- Testes de interface verificam o desfoque durante a abertura das janelas.
+
