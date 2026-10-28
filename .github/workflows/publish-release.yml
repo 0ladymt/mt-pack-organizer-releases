@@ -1,6 +1,10 @@
 name: Build e publicar MT Pack Organizer
 
 on:
+  pull_request:
+    paths:
+      - "src/**"
+      - ".github/workflows/publish-release.yml"
   push:
     branches:
       - main
@@ -308,7 +312,7 @@ jobs:
           if (-not (Test-Path "build\installer\MT_Pack_Organizer_Setup_$env:VERSION.exe")) { throw "Instalador não foi compilado." }
 
       - name: Publicar Release automaticamente
-        if: steps.existing.outputs.exists != 'true'
+        if: github.event_name == 'push' && steps.existing.outputs.exists != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -338,6 +342,8 @@ jobs:
         run: |
           if ($env:EXISTS -eq 'true') {
             "### $env:TAG já estava publicado" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          } elseif ('${{ github.event_name }}' -eq 'pull_request') {
+            "### Build de validação $env:TAG: sem publicação" | Out-File $env:GITHUB_STEP_SUMMARY -Append
           } else {
             "### MT Pack Organizer $env:VERSION publicado automaticamente" | Out-File $env:GITHUB_STEP_SUMMARY -Append
             "" | Out-File $env:GITHUB_STEP_SUMMARY -Append
