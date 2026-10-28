@@ -1258,10 +1258,12 @@ function Update-TransformBoxVisual {
     $right=[Math]::Min($vw-5.0,[double]$pb.Right+$pad)
     $bottom=[Math]::Min($vh-5.0,[double]$pb.Bottom+$pad)
     $w=[Math]::Max(36.0,$right-$left); $h=[Math]::Max(36.0,$bottom-$top)
-    # Durante rotação, a caixa mantém o tamanho inicial do gesto.
-    # Apenas o controle de escala deve redimensioná-la intencionalmente.
-    if($script:TransformDragMode -like 'ROTATE_*' -and $script:TransformDragBoxWidth -gt 0){
-        $w=$script:TransformDragBoxWidth;$h=$script:TransformDragBoxHeight
+    # A moldura segue o centro da malha mas não muda de dimensão ao girar.
+    # Escala e zoom são as únicas operações que alteram seu tamanho.
+    if($script:SelectionBoxWidth -gt 0 -and $script:SelectionBoxScale -gt 0 -and $script:SelectionBoxDistance -gt 0){
+        $factor=($script:ModelScale/$script:SelectionBoxScale)*($script:SelectionBoxDistance/[Math]::Max(0.001,$script:CameraDistance))
+        $w=[Math]::Max(36.0,$script:SelectionBoxWidth*$factor)
+        $h=[Math]::Max(36.0,$script:SelectionBoxHeight*$factor)
     }
     $centerX=($left+$right)/2.0; $centerY=($top+$bottom)/2.0
     $transformBox.Width=$w
@@ -1271,8 +1273,19 @@ function Update-TransformBoxVisual {
 
 function Set-TransformBox([bool]$show) {
     $script:TransformBoxEnabled=$show
-    if($show){$transformBox.Visibility='Visible'}
-    else{$transformBox.Visibility='Collapsed'}
+    if($show){
+        if(-not $script:SelectionBoxWidth){
+            $script:SelectionBoxWidth=0.0
+            $script:SelectionBoxHeight=0.0
+            Update-TransformBoxVisual
+            $script:SelectionBoxWidth=[double]$transformBox.Width
+            $script:SelectionBoxHeight=[double]$transformBox.Height
+            $script:SelectionBoxScale=[double]$script:ModelScale
+            $script:SelectionBoxDistance=[double]$script:CameraDistance
+        }
+        $transformBox.Visibility='Visible'
+    }
+    else{$transformBox.Visibility='Collapsed';$script:SelectionBoxWidth=0.0;$script:SelectionBoxHeight=0.0}
     Update-TransformBoxVisual
 }
 
@@ -1375,7 +1388,7 @@ function Build-Viewport([IO.FileInfo]$ydd) {
             $script:SavedView=$null
         }
     }
-    if($transformBox){$transformBox.Visibility='Collapsed';$script:TransformBoxEnabled=$false}
+    if($transformBox){$transformBox.Visibility='Collapsed';$script:TransformBoxEnabled=$false;$script:SelectionBoxWidth=0.0;$script:SelectionBoxHeight=0.0}
 
     if ($firstViewport) { $script:Camera = New-Object Windows.Media.Media3D.PerspectiveCamera }
     $script:Camera.FieldOfView = 36
@@ -3202,5 +3215,14 @@ $win.Add_KeyDown({
     }
 })
 
+if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
+    # Exercita também XamlReader.Load, bindings, handlers e montagem real do WPF.
+    # Não abre pack nem realiza atualização de produção.
+    $win.Show()
+    [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+    $win.Close()
+    Write-Host 'MT_PACK_ORGANIZER_UI_SELFTEST_OK'
+    exit 0
+}
 Start-SilentUpdateCheck
 $win.ShowDialog() | Out-Null
