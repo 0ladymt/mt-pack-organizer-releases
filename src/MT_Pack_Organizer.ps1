@@ -878,8 +878,9 @@ function Refresh-RecentProjects {
         try {
             if(Test-Path -LiteralPath $stateFile){
                 $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
-                $keep=@($state.decisions.PSObject.Properties | Where-Object { $_.Value -eq 'MANTER' }).Count
-                $deleted=@($state.decisions.PSObject.Properties | Where-Object { $_.Value -eq 'EXCLUIR' }).Count
+                $allDecisions=if($state.decisions){@($state.decisions.PSObject.Properties)}else{@()}
+                $keep=@($allDecisions | Where-Object { $_.Value -eq 'MANTER' }).Count
+                $deleted=@($allDecisions | Where-Object { $_.Value -eq 'EXCLUIR' }).Count
                 $total=[int]$state.total_pieces
                 $percent=if($total -gt 0){[Math]::Round(100*($keep+$deleted)/$total)}else{0}
                 $details.Text="Manter: $keep  •  Excluir: $deleted  •  Progresso: $percent%  •  Última peça: $([int]$state.index+1)"
@@ -921,7 +922,12 @@ function Save-State {
         }
     }
     # Estado leve: NÃO recalcula plano/build a cada clique. Isso era uma das maiores causas de travamento.
-    $obj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Get-StatePath) -Encoding UTF8
+    try {
+        $target=Get-StatePath
+        $temp=$target+'.tmp'
+        $obj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temp -Encoding UTF8
+        Move-Item -LiteralPath $temp -Destination $target -Force
+    } catch { Write-AppLog ('Não foi possível salvar o progresso: '+$_.Exception.Message) }
 }
 
 function Load-State {
