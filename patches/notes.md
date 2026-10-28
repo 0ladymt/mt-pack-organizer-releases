@@ -33,3 +33,13 @@ MT Pack Organizer 0.9.25
 - Aviso de atualização transformado em botão ATUALIZAR com contraste e alinhamento próprios.
 - Testes de interface verificam o desfoque durante a abertura das janelas.
 
+# MT Pack Organizer 0.9.29
+
+- Ferramenta de transformação 3D reestruturada: eixo azul de profundidade Y funcional, além do X vermelho e Z verde.
+- Anéis de rotação independentes, com realce ativo e outros eixos atenuados; plano translúcido quando interage com a seleção.
+- Escala pelos quatro cantos passa a usar a distância ao centro da seleção, sem inverter a direção em alguns cantos.
+- Rotação no plano da tela usa movimento angular real ao redor do centro; os outros dois eixos usam sensibilidade proporcional à caixa.
+- A moldura mantém largura/altura ao girar e altera a projeção quando a escala, o zoom ou a profundidade muda.
+- Posição em profundidade agora é salva e restaurada junto com as demais configurações de visualização.
+- Autoteste WPF de geometria verifica dimensões estáveis, movimento em profundidade e realce de controles.
+
