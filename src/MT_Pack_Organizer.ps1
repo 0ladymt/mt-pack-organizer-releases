@@ -1,6 +1,35 @@
 ﻿Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase,System.Xaml
 Add-Type -AssemblyName System.Windows.Forms
 
+Add-Type -ReferencedAssemblies PresentationCore,WindowsBase -TypeDefinition @'
+using System;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+public static class MtTextureLighting {
+    public static BitmapSource Brighten(BitmapSource source, int light) {
+        if (source == null || light <= 0) return source;
+        light = Math.Max(0, Math.Min(100, light));
+        double gamma = 1.0 - 0.63 * light / 100.0;
+        byte[] lut = new byte[256];
+        for (int i = 0; i < 256; i++)
+            lut[i] = (byte)Math.Min(255, Math.Round(255.0 * Math.Pow(i / 255.0, gamma)));
+        BitmapSource rgba = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        int stride = checked(rgba.PixelWidth * 4);
+        byte[] pixels = new byte[checked(stride * rgba.PixelHeight)];
+        rgba.CopyPixels(pixels, stride, 0);
+        for (int i = 0; i < pixels.Length; i += 4) {
+            pixels[i] = lut[pixels[i]];
+            pixels[i + 1] = lut[pixels[i + 1]];
+            pixels[i + 2] = lut[pixels[i + 2]];
+        }
+        BitmapSource result = BitmapSource.Create(rgba.PixelWidth, rgba.PixelHeight,
+            rgba.DpiX, rgba.DpiY, PixelFormats.Bgra32, null, pixels, stride);
+        result.Freeze();
+        return result;
+    }
+}
+'@
+
 $ErrorActionPreference = 'Stop'
 # Evita duas janelas de trabalho quando o usuário clica no atalho novamente.
 $script:InstanceMutex=$null
@@ -934,9 +963,10 @@ function Get-SavedProjectInfo([string]$path) {
 
 function Prompt-ProjectName([string]$current) {
     $dialog=New-Object Windows.Window
-    $dialog.Title='Nome do projeto • MT Studio';$dialog.Width=420;$dialog.Height=220
+    $dialog.Title='Nome do projeto';$dialog.Width=420;$dialog.Height=220
     $dialog.WindowStartupLocation='CenterOwner';$dialog.Owner=$win
     $dialog.ResizeMode='NoResize';$dialog.Background=New-SolidBrush '#101014'
+    if($win.Icon){$dialog.Icon=$win.Icon}
     $panel=New-Object Windows.Controls.StackPanel
     $panel.Margin='22'
     $heading=New-Object Windows.Controls.TextBlock
@@ -951,11 +981,20 @@ function Prompt-ProjectName([string]$current) {
     $cancel=New-Object Windows.Controls.Button;$cancel.Content='CANCELAR';$cancel.Width=100;$cancel.Height=34
     $confirm=New-Object Windows.Controls.Button;$confirm.Content='SALVAR';$confirm.Width=100;$confirm.Height=34;$confirm.Margin='8,0,0,0'
     $confirm.Background=New-SolidBrush '#A432DC';$confirm.Foreground=New-SolidBrush '#FFFFFF'
-    $cancel.Add_Click({$dialog.DialogResult=$false})
-    $confirm.Add_Click({if(-not [string]::IsNullOrWhiteSpace($input.Text)){$dialog.DialogResult=$true}})
+    # Handlers WPF executam após a saída do escopo de Prompt-ProjectName.
+    # GetNewClosure preserva a janela e o campo, inclusive ao clicar em SALVAR.
+    $cancel.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
+    $confirm.Add_Click({if(-not [string]::IsNullOrWhiteSpace($input.Text)){$dialog.DialogResult=$true}}.GetNewClosure())
+    $input.Add_KeyDown({param($s,$e);if($e.Key -eq 'Return' -and -not [string]::IsNullOrWhiteSpace($input.Text)){$dialog.DialogResult=$true}}.GetNewClosure())
     [void]$buttons.Children.Add($cancel);[void]$buttons.Children.Add($confirm);[void]$panel.Children.Add($buttons)
     $dialog.Content=$panel
     $input.SelectAll();$input.Focus() | Out-Null
+    if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
+        [void]$dialog.Dispatcher.BeginInvoke([Action]{
+            $input.Text='Projeto nomeado no teste'
+            $confirm.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+        }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
+    }
     if($dialog.ShowDialog() -eq $true){return $input.Text.Trim()}
     return $null
 }
@@ -1338,6 +1377,10 @@ function New-SolidMaterial([string]$hex) {
 }
 
 function New-TextureMaterial($bitmap) {
+    # A luz clareia os pixels da textura, preservando contraste e transparência.
+    # A iluminação 3D comum multiplica o preto por branco e não consegue revelar
+    # uma estampa escura; ajustar gama é necessário para esse caso.
+    $bitmap=[MtTextureLighting]::Brighten($bitmap,[int]$script:LightLevel)
     $brush = New-Object Windows.Media.ImageBrush
     $brush.ImageSource = $bitmap
 
@@ -1357,15 +1400,6 @@ function New-TextureMaterial($bitmap) {
     $diff = New-Object Windows.Media.Media3D.DiffuseMaterial $brush
     $group = New-Object Windows.Media.Media3D.MaterialGroup
     $group.Children.Add($diff)
-    # Luz de preenchimento independente das normais da malha para recuperar
-    # detalhes de tecidos pretos sem alterar a textura original.
-    $amount=[Math]::Max(0.0,([double]$script:LightLevel-30.0)/70.0)
-    if($amount -gt 0){
-        $glow=New-Object Windows.Media.SolidColorBrush ([Windows.Media.Color]::FromRgb(105,105,110))
-        $glow.Opacity=[Math]::Min(0.55,$amount*0.55)
-        $glow.Freeze()
-        $group.Children.Add((New-Object Windows.Media.Media3D.EmissiveMaterial $glow))
-    }
     $group.Freeze()
     return $group
 }
@@ -1436,18 +1470,21 @@ function Get-ProjectedModelBounds {
         $valid++
     }}}
     if($valid -eq 0){return $null}
-    [pscustomobject]@{Left=$minX;Top=$minY;Right=$maxX;Bottom=$maxY}
+    # O centro geométrico, ao contrário da média dos extremos projetados,
+    # não salta de posição ao girar uma malha assimétrica.
+    $cp=$matrix.Transform([Windows.Media.Media3D.Point3D]::new(($b.X+$b.SizeX/2.0),($b.Y+$b.SizeY/2.0),($b.Z+$b.SizeZ/2.0)))
+    $cd=[Math]::Max(0.01,[double]$cp.Y+[double]$script:CameraDistance)
+    $cx=($vw/2.0)+(($cp.X/($cd*$tanH))*($vw/2.0))
+    $cy=($vh/2.0)-(($cp.Z/($cd*$tanV))*($vh/2.0))
+    [pscustomobject]@{Left=$minX;Top=$minY;Right=$maxX;Bottom=$maxY;CenterX=$cx;CenterY=$cy}
 }
 
 function Update-Lighting {
     $value=[double]$script:LightLevel
     if($lblLightValue){$lblLightValue.Text="$([int]$value)%"}
-    $channel=[byte][Math]::Round([Math]::Max(50,[Math]::Min(255,50+$value*2.05)))
+    $channel=[byte][Math]::Round([Math]::Max(190,[Math]::Min(255,190+$value*0.65)))
     if($script:AmbientLight){$script:AmbientLight.Color=[Windows.Media.Color]::FromRgb($channel,$channel,$channel)}
-    if($viewHost){
-        $bg=[byte][Math]::Round(9+($value/100.0)*43)
-        $viewHost.Background=New-SolidBrush ([string]::Format('#{0:X2}{1:X2}{2:X2}',$bg,$bg,[byte]($bg+3)))
-    }
+    if($viewHost){$viewHost.Background=New-SolidBrush '#121218'}
     if($script:CurrentTextures -and $script:CurrentTextures.Count -gt 0 -and $script:GeometryEntries.Count -gt 0){
         Apply-TextureArray $script:CurrentTextures
     }
@@ -1477,7 +1514,7 @@ function Update-TransformBoxVisual {
         $w=[Math]::Max(36.0,$script:SelectionBoxWidth*$factor)
         $h=[Math]::Max(36.0,$script:SelectionBoxHeight*$factor)
     }
-    $centerX=($left+$right)/2.0; $centerY=($top+$bottom)/2.0
+    $centerX=[double]$pb.CenterX; $centerY=[double]$pb.CenterY
     $transformBox.Width=$w
     $transformBox.Height=$h
     $transformBox.RenderTransform=[Windows.Media.TranslateTransform]::new($centerX-($vw/2.0),$centerY-($vh/2.0))
@@ -3093,19 +3130,19 @@ $xamlText = @'
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
             <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="10,7" CornerRadius="10" Background="#19141F" BorderBrush="#543064" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="☀" Foreground="#D88BFF" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="ILUMINAÇÃO" Foreground="#DCC3E8" FontWeight="Bold" FontSize="9" VerticalAlignment="Center" Margin="0,0,9,0"/><Button Name="btnLightDown" Content="−" Width="29" Height="28" Padding="0" FontSize="17"/><Border Background="#261B2C" CornerRadius="5" Width="48" Margin="5,0" Padding="2" VerticalAlignment="Center"><TextBlock Name="lblLightValue" Text="50%" FontSize="11" FontWeight="Bold" TextAlignment="Center" Foreground="#FFFFFF"/></Border><Button Name="btnLightUp" Content="+" Width="29" Height="28" Padding="0" FontSize="16"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
-                <Border BorderBrush="#B8B5B8" BorderThickness="1.2" Opacity="0.78"/>
-                <Ellipse Name="rotNW" Width="10" Height="10" Fill="#ECD9B4" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-5,-5,0,0" Cursor="SizeNWSE" ToolTip="Redimensionar"/>
-                <Ellipse Name="rotNE" Width="10" Height="10" Fill="#ECD9B4" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0" Cursor="SizeNESW" ToolTip="Redimensionar"/>
-                <Ellipse Name="rotSW" Width="10" Height="10" Fill="#ECD9B4" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-5,0,0,-5" Cursor="SizeNESW" ToolTip="Redimensionar"/>
-                <Ellipse Name="rotSE" Width="10" Height="10" Fill="#ECD9B4" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-5,-5" Cursor="SizeNWSE" ToolTip="Redimensionar"/>
-                <Rectangle Name="rotTop" Width="24" Height="5" RadiusX="2" RadiusY="2" Fill="#D7D2D7" Stroke="#FFFFFF" StrokeThickness="0.5" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-3,0,0" Cursor="Hand" ToolTip="Girar no eixo X"/>
-                <Rectangle Name="rotBottom" Width="24" Height="5" RadiusX="2" RadiusY="2" Fill="#D7D2D7" Stroke="#FFFFFF" StrokeThickness="0.5" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-3" Cursor="Hand" ToolTip="Girar no eixo X"/>
-                <Rectangle Name="rotLeft" Width="5" Height="24" RadiusX="2" RadiusY="2" Fill="#D7D2D7" Stroke="#FFFFFF" StrokeThickness="0.5" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-3,0,0,0" Cursor="Hand" ToolTip="Girar no eixo Y"/>
-                <Rectangle Name="rotRight" Width="5" Height="24" RadiusX="2" RadiusY="2" Fill="#D7D2D7" Stroke="#FFFFFF" StrokeThickness="0.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-3,0" Cursor="Hand" ToolTip="Girar no eixo Y"/>
+                <Border BorderBrush="#99959C" BorderThickness="1.3" Opacity="0.95"/>
+                <Rectangle Name="rotNW" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-5,-5,0,0" Cursor="SizeNWSE" ToolTip="Redimensionar proporcionalmente"/>
+                <Rectangle Name="rotNE" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0" Cursor="SizeNESW" ToolTip="Redimensionar proporcionalmente"/>
+                <Rectangle Name="rotSW" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-5,0,0,-5" Cursor="SizeNESW" ToolTip="Redimensionar proporcionalmente"/>
+                <Rectangle Name="rotSE" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-5,-5" Cursor="SizeNWSE" ToolTip="Redimensionar proporcionalmente"/>
+                <Rectangle Name="rotTop" Width="29" Height="6" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-3,0,0" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
+                <Rectangle Name="rotBottom" Width="29" Height="6" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-3" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
+                <Rectangle Name="rotLeft" Width="6" Height="29" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-3,0,0,0" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
+                <Rectangle Name="rotRight" Width="6" Height="29" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-3,0" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
                 <Grid Width="144" Height="144" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
-                    <Ellipse Name="gizmoRoll" Width="102" Height="102" Stroke="#E4CD34" StrokeThickness="2.5" Opacity="0.96" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
-                    <Ellipse Name="gizmoYaw" Width="119" Height="39" Stroke="#E2BB34" StrokeThickness="2" Opacity="0.75" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
-                    <Ellipse Name="gizmoPitch" Width="39" Height="119" Stroke="#96A8B9" StrokeThickness="1.7" Opacity="0.45" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
+                    <Ellipse Name="gizmoRoll" Width="102" Height="102" Stroke="#E8C900" StrokeThickness="2" Opacity="0.92" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
+                    <Ellipse Name="gizmoYaw" Width="116" Height="37" Stroke="#E8C900" StrokeThickness="1.8" Opacity="0.85" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
+                    <Ellipse Name="gizmoPitch" Width="37" Height="116" Stroke="#91A3B8" StrokeThickness="1.5" Opacity="0.45" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
                     <Line Name="axisX" X1="72" Y1="72" X2="128" Y2="72" Stroke="#F05F68" StrokeThickness="4" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
                     <Polygon Name="axisXHead" Points="128,66 142,72 128,78" Fill="#F05F68" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
                     <Line Name="axisZ" X1="72" Y1="72" X2="72" Y2="16" Stroke="#55D978" StrokeThickness="4" Cursor="SizeNS" ToolTip="Mover no eixo Z"/>
@@ -3182,7 +3219,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.25'
+$script:AppVersion = '0.9.26'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3257,10 +3294,56 @@ public static class MtNativeWindow {
 }
 "@ }
     [void][MtNativeWindow]::SetCurrentProcessExplicitAppUserModelID('MTStudio.PackOrganizer')
+    # Windows agrupa pelo processo real (powershell.exe), não pelo launcher Go.
+    # Gravar as propriedades de RELANÇAMENTO na janela permite fixá-la na barra
+    # como MT Pack Organizer.exe, com o ícone certo, em vez de PowerShell.
+    if(-not ('MtTaskbarIdentity' -as [type])){Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+[ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface MtWindowPropertyStore {
+    [PreserveSig] int GetCount(out uint count);
+    [PreserveSig] int GetAt(uint index, out MtPropertyKey key);
+    [PreserveSig] int GetValue(ref MtPropertyKey key, out MtPropVariant value);
+    [PreserveSig] int SetValue(ref MtPropertyKey key, ref MtPropVariant value);
+    [PreserveSig] int Commit();
+}
+[StructLayout(LayoutKind.Sequential)] public struct MtPropertyKey { public Guid fmtid; public uint pid; }
+[StructLayout(LayoutKind.Explicit, Size=24)] public struct MtPropVariant {
+    [FieldOffset(0)] public ushort vt;
+    [FieldOffset(8)] public IntPtr value;
+}
+public static class MtTaskbarIdentity {
+    [DllImport("shell32.dll")] private static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, out MtWindowPropertyStore store);
+    private static readonly Guid fmt = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+    private static void Set(MtWindowPropertyStore store, uint pid, string text) {
+        MtPropertyKey key = new MtPropertyKey { fmtid=fmt, pid=pid };
+        MtPropVariant value = new MtPropVariant { vt=31, value=Marshal.StringToCoTaskMemUni(text) };
+        try { int hr=store.SetValue(ref key, ref value); if(hr!=0) Marshal.ThrowExceptionForHR(hr); }
+        finally { Marshal.FreeCoTaskMem(value.value); }
+    }
+    public static void SetWindow(IntPtr hwnd, string exe, string icon) {
+        Guid iid=typeof(MtWindowPropertyStore).GUID;
+        MtWindowPropertyStore store;
+        int hr=SHGetPropertyStoreForWindow(hwnd,ref iid,out store);
+        if(hr!=0) Marshal.ThrowExceptionForHR(hr);
+        try {
+            Set(store,2,"\""+exe+"\""); // RelaunchCommand precisa preceder o AppID
+            Set(store,3,icon+",0"); // RelaunchIconResource
+            Set(store,4,"MT Pack Organizer"); // RelaunchDisplayNameResource
+            Set(store,5,"MTStudio.PackOrganizer"); // AppUserModel.ID
+            store.Commit();
+        } finally { Marshal.ReleaseComObject(store); }
+    }
+}
+'@ }
     $win.Add_SourceInitialized({
         try {
-            if($script:TaskbarIcon){$h=(New-Object System.Windows.Interop.WindowInteropHelper($win)).Handle;[void][MtNativeWindow]::SendMessage($h,0x80,[IntPtr]0,$script:TaskbarIcon.Handle);[void][MtNativeWindow]::SendMessage($h,0x80,[IntPtr]1,$script:TaskbarIcon.Handle)}
-        } catch {}
+            $h=(New-Object System.Windows.Interop.WindowInteropHelper($win)).Handle
+            if($script:TaskbarIcon){[void][MtNativeWindow]::SendMessage($h,0x80,[IntPtr]0,$script:TaskbarIcon.Handle);[void][MtNativeWindow]::SendMessage($h,0x80,[IntPtr]1,$script:TaskbarIcon.Handle)}
+            $nativeExe=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MT Studio\Pack Organizer\MT Pack Organizer.exe'
+            if(Test-Path -LiteralPath $nativeExe){[MtTaskbarIdentity]::SetWindow($h,$nativeExe,$nativeExe)}
+        } catch {Write-AppLog ('Identidade barra de tarefas: '+$_.Exception.Message)}
     })
 } catch { Write-AppLog ('Logo/assets: '+$_.Exception.Message) }
 
@@ -3487,6 +3570,9 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
     # Não abre pack nem realiza atualização de produção.
     $win.Show()
     [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+    if((Prompt-ProjectName 'Nome inicial') -ne 'Projeto nomeado no teste'){
+        throw 'A janela de nome do projeto não confirmou SALVAR.'
+    }
     $fixture=Join-Path ([IO.Path]::GetTempPath()) ('MTPO_UI_TEST_'+[Guid]::NewGuid().ToString('N'))
     $legacyFixture=$fixture+'_legacy'
     try {
