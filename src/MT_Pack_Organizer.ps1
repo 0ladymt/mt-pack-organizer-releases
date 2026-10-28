@@ -2,6 +2,21 @@
 Add-Type -AssemblyName System.Windows.Forms
 
 $ErrorActionPreference = 'Stop'
+# Evita duas janelas de trabalho quando o usuário clica no atalho novamente.
+$script:InstanceMutex=$null
+$createdNew=$false
+try {
+    $script:InstanceMutex=[Threading.Mutex]::new($true,'Local\MTStudio.PackOrganizer.SingleInstance',[ref]$createdNew)
+    if(-not $createdNew){
+        # Se o atalho for clicado outra vez, traz a janela existente para frente.
+        try {
+            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class MtFocusWindow { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int n); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); }' -ErrorAction SilentlyContinue
+            $existing=Get-Process -Name powershell,pwsh -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like '*Pack Organizer*' -and $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
+            if($existing){[void][MtFocusWindow]::ShowWindow($existing.MainWindowHandle,9);[void][MtFocusWindow]::SetForegroundWindow($existing.MainWindowHandle)}
+        } catch {}
+        exit 0
+    }
+} catch { }
 $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Branding oficial: os assets são empacotados pelo build e nunca são recriados/reescritos em runtime.
 # Isso evita PNG corrompido, logo ausente e divergência entre app, barra de tarefas e instalador.
@@ -833,15 +848,36 @@ try {
 
 # --------------------------- Estado e arquivos --------------------------------
 
+function Get-AppDataDir {
+    $dir=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MTStudio\PackOrganizer'
+    if(-not (Test-Path -LiteralPath $dir)){[void](New-Item -ItemType Directory -Path $dir -Force)}
+    return $dir
+}
+
+function Get-StatePathForPack([string]$path) {
+    if([string]::IsNullOrWhiteSpace($path)){return $null}
+    $normalized=[IO.Path]::GetFullPath($path).TrimEnd('\').ToLowerInvariant()
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try {
+        $digest=$sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($normalized))
+        $id=([BitConverter]::ToString($digest)).Replace('-','').Substring(0,20).ToLowerInvariant()
+    } finally {$sha.Dispose()}
+    return (Join-Path (Get-AppDataDir) ("project_$id.json"))
+}
+
 function Get-StatePath {
-    if (-not $script:PackPath) { return $null }
-    return (Join-Path $script:PackPath '_MT_PACK_ORGANIZER_STATE.json')
+    return (Get-StatePathForPack ([string]$script:PackPath))
+}
+
+function Get-ProjectStateCandidates([string]$path) {
+    $primary=Get-StatePathForPack $path
+    $legacy=Join-Path $path '_MT_PACK_ORGANIZER_STATE.json'
+    $candidates=@($primary,($primary+'.bak'),$legacy)
+    return @($candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Sort-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc } -Descending)
 }
 
 function Get-RecentProjectsPath {
-    $dir=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MTStudio\PackOrganizer'
-    if(-not (Test-Path -LiteralPath $dir)){[void](New-Item -ItemType Directory -Path $dir -Force)}
-    return (Join-Path $dir 'recent_projects.json')
+    return (Join-Path (Get-AppDataDir) 'recent_projects.json')
 }
 
 function Get-RecentProjectPaths {
@@ -860,47 +896,160 @@ function Remember-Project([string]$path) {
     } catch { Write-AppLog ('Salvar projeto recente: '+$_.Exception.Message) }
 }
 
+function Remove-RecentProject([string]$path) {
+    $ans=[Windows.MessageBox]::Show("Excluir este projeto da página inicial?`n`n$path`n`nOs arquivos de roupas NÃO serão apagados. Os dados do projeto serão arquivados para recuperação.",'Excluir projeto','YesNo','Warning')
+    if($ans -ne 'Yes'){return}
+    $statePath=Get-StatePathForPack $path
+    $archiveDir=Join-Path (Get-AppDataDir) 'projetos_arquivados'
+    if(-not (Test-Path -LiteralPath $archiveDir)){[void](New-Item -ItemType Directory -Path $archiveDir -Force)}
+    foreach($file in @($statePath,($statePath+'.bak'))){
+        if(Test-Path -LiteralPath $file){
+            $name=([IO.Path]::GetFileName($file))+'_'+(Get-Date -Format 'yyyyMMddHHmmssfff')
+            Move-Item -LiteralPath $file -Destination (Join-Path $archiveDir $name)
+        }
+    }
+    $paths=@(Get-RecentProjectPaths | Where-Object { [string]$_ -ne $path })
+    ConvertTo-Json -InputObject @($paths) | Set-Content -LiteralPath (Get-RecentProjectsPath) -Encoding UTF8
+    Refresh-RecentProjects
+}
+
+function Get-SavedProjectInfo([string]$path) {
+    $info=[pscustomobject]@{Name=(Get-DefaultProjectName $path);Keep=0;Delete=0;Total=0;Index=0;Percent=0}
+    foreach($stateFile in @(Get-ProjectStateCandidates $path)){
+        try {
+            $state=Get-Content -LiteralPath $stateFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if($null -eq $state.decisions){continue}
+            $decisions=@($state.decisions.PSObject.Properties)
+            $info.Keep=@($decisions | Where-Object { $_.Value -eq 'MANTER' }).Count
+            $info.Delete=@($decisions | Where-Object { $_.Value -eq 'EXCLUIR' }).Count
+            $info.Total=[int]$state.total_pieces
+            $info.Index=[int]$state.index
+            $info.Percent=if($info.Total -gt 0){[Math]::Min(100,[Math]::Round(100*($info.Keep+$info.Delete)/$info.Total))}else{0}
+            if(-not [string]::IsNullOrWhiteSpace([string]$state.project_name)){$info.Name=[string]$state.project_name}
+            break
+        } catch {Write-AppLog ('Resumo de '+$stateFile+': '+$_.Exception.Message)}
+    }
+    return $info
+}
+
+function Prompt-ProjectName([string]$current) {
+    $dialog=New-Object Windows.Window
+    $dialog.Title='Nome do projeto • MT Studio';$dialog.Width=420;$dialog.Height=220
+    $dialog.WindowStartupLocation='CenterOwner';$dialog.Owner=$win
+    $dialog.ResizeMode='NoResize';$dialog.Background=New-SolidBrush '#101014'
+    $panel=New-Object Windows.Controls.StackPanel
+    $panel.Margin='22'
+    $heading=New-Object Windows.Controls.TextBlock
+    $heading.Text='NOME DO PROJETO';$heading.Foreground=New-SolidBrush '#D88BFF';$heading.FontWeight='Bold';$heading.FontSize=14
+    [void]$panel.Children.Add($heading)
+    $input=New-Object Windows.Controls.TextBox
+    $input.Text=$current;$input.FontSize=14;$input.Height=36;$input.Margin='0,14,0,14';$input.MaxLength=60
+    $input.Background=New-SolidBrush '#1B1720';$input.Foreground=New-SolidBrush '#FFFFFF'
+    $input.BorderBrush=New-SolidBrush '#A432DC';$input.Padding='7,5'
+    [void]$panel.Children.Add($input)
+    $buttons=New-Object Windows.Controls.StackPanel;$buttons.Orientation='Horizontal';$buttons.HorizontalAlignment='Right'
+    $cancel=New-Object Windows.Controls.Button;$cancel.Content='CANCELAR';$cancel.Width=100;$cancel.Height=34
+    $confirm=New-Object Windows.Controls.Button;$confirm.Content='SALVAR';$confirm.Width=100;$confirm.Height=34;$confirm.Margin='8,0,0,0'
+    $confirm.Background=New-SolidBrush '#A432DC';$confirm.Foreground=New-SolidBrush '#FFFFFF'
+    $cancel.Add_Click({$dialog.DialogResult=$false})
+    $confirm.Add_Click({if(-not [string]::IsNullOrWhiteSpace($input.Text)){$dialog.DialogResult=$true}})
+    [void]$buttons.Children.Add($cancel);[void]$buttons.Children.Add($confirm);[void]$panel.Children.Add($buttons)
+    $dialog.Content=$panel
+    $input.SelectAll();$input.Focus() | Out-Null
+    if($dialog.ShowDialog() -eq $true){return $input.Text.Trim()}
+    return $null
+}
+
+function Rename-RecentProject([string]$path) {
+    $old=Get-SavedProjectInfo $path
+    $name=Prompt-ProjectName $old.Name
+    if([string]::IsNullOrWhiteSpace($name)){return}
+    if([string]$script:PackPath -ieq $path){
+        $script:ProjectName=$name;Save-State;$lblPackName.Text=$name
+    } else {
+        $previousPath=$script:PackPath;$previousName=$script:ProjectName
+        try {
+            $script:PackPath=$path;$script:ProjectName=$name
+            # Renomear um projeto fechado sem alterar suas decisões existentes.
+            $statePath=Get-StatePath
+            $candidate=@(Get-ProjectStateCandidates $path | Select-Object -First 1)
+            if($candidate.Count -gt 0){
+                $data=Get-Content -LiteralPath $candidate[0] -Raw | ConvertFrom-Json
+                $data | Add-Member -NotePropertyName project_name -NotePropertyValue $name -Force
+                $json=ConvertTo-Json -InputObject $data -Depth 10
+                if(Test-Path -LiteralPath $statePath){Copy-Item -LiteralPath $statePath -Destination ($statePath+'.bak') -Force}
+                [IO.File]::WriteAllText($statePath,$json,[Text.Encoding]::UTF8)
+            }
+        } finally {
+            $script:PackPath=$previousPath;$script:ProjectName=$previousName
+        }
+    }
+    Refresh-RecentProjects
+}
+
 function Refresh-RecentProjects {
     if($null -eq $lstRecentProjects){return}
     $lstRecentProjects.Items.Clear()
     foreach($path in @(Get-RecentProjectPaths)) {
+        $summary=Get-SavedProjectInfo $path
         $item=New-Object Windows.Controls.ListBoxItem
         $item.Tag=[string]$path
-        $panel=New-Object Windows.Controls.StackPanel
+        $panel=New-Object Windows.Controls.Grid
+        $panel.Margin='8,6'
+        $panel.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
+        $rightCol=New-Object Windows.Controls.ColumnDefinition;$rightCol.Width='Auto';$panel.ColumnDefinitions.Add($rightCol)
+        $left=New-Object Windows.Controls.StackPanel
         $name=New-Object Windows.Controls.TextBlock
-        $name.Text=Split-Path ([string]$path) -Leaf
-        $name.FontWeight='SemiBold';$name.FontSize=12
-        [void]$panel.Children.Add($name)
+        $name.Text=[string]$summary.Name
+        $name.FontWeight='Bold';$name.FontSize=15
+        [void]$left.Children.Add($name)
         $details=New-Object Windows.Controls.TextBlock
-        $details.FontSize=9;$details.Foreground=New-SolidBrush '#A79AAB'
-        $stateFile=Join-Path ([string]$path) '_MT_PACK_ORGANIZER_STATE.json'
-        $details.Text='Projeto ainda não revisado'
-        try {
-            if(Test-Path -LiteralPath $stateFile){
-                $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
-                $allDecisions=if($state.decisions){@($state.decisions.PSObject.Properties)}else{@()}
-                $keep=@($allDecisions | Where-Object { $_.Value -eq 'MANTER' }).Count
-                $deleted=@($allDecisions | Where-Object { $_.Value -eq 'EXCLUIR' }).Count
-                $total=[int]$state.total_pieces
-                $percent=if($total -gt 0){[Math]::Round(100*($keep+$deleted)/$total)}else{0}
-                $details.Text="Manter: $keep  •  Excluir: $deleted  •  Progresso: $percent%  •  Última peça: $([int]$state.index+1)"
-            }
-        } catch { Write-AppLog ('Resumo do projeto: '+$_.Exception.Message) }
-        [void]$panel.Children.Add($details)
+        $details.Margin='0,8,0,7';$details.FontSize=11;$details.Foreground=New-SolidBrush '#B9AFC0'
+        $details.Text="MANTER  $($summary.Keep)     EXCLUIR  $($summary.Delete)     $($summary.Percent)% CONCLUÍDO     PEÇA $([int]$summary.Index+1)/$($summary.Total)"
+        [void]$left.Children.Add($details)
+        $bar=New-Object Windows.Controls.ProgressBar
+        $bar.Height=5;$bar.Maximum=100;$bar.Value=[double]$summary.Percent
+        $bar.Foreground=New-SolidBrush '#A432DC';$bar.Background=New-SolidBrush '#302637'
+        $bar.MaxWidth=530;$bar.HorizontalAlignment='Stretch'
+        [void]$left.Children.Add($bar)
         $pathText=New-Object Windows.Controls.TextBlock
-        $pathText.Text=[string]$path;$pathText.FontSize=8;$pathText.Foreground=New-SolidBrush '#68646D'
-        $pathText.TextTrimming='CharacterEllipsis';[void]$panel.Children.Add($pathText)
+        $pathText.Text=[string]$path;$pathText.FontSize=9;$pathText.Foreground=New-SolidBrush '#77717D'
+        $pathText.Margin='0,8,0,0';$pathText.TextTrimming='CharacterEllipsis';[void]$left.Children.Add($pathText)
+        [Windows.Controls.Grid]::SetColumn($left,0);[void]$panel.Children.Add($left)
+        $actions=New-Object Windows.Controls.StackPanel;$actions.Orientation='Vertical';$actions.Margin='22,0,0,0'
+        $open=New-Object Windows.Controls.Button;$open.Content='CONTINUAR  ›';$open.Width=125;$open.Height=36;$open.Padding='2'
+        $rename=New-Object Windows.Controls.Button;$rename.Content='RENOMEAR';$rename.Width=125;$rename.Height=34;$rename.Padding='2';$rename.Margin='0,7,0,0'
+        $remove=New-Object Windows.Controls.Button;$remove.Content='EXCLUIR PROJETO';$remove.Width=125;$remove.Height=34;$remove.Padding='2';$remove.Margin='0,7,0,0'
+        $remove.Foreground=New-SolidBrush '#FF9CA4'
+        $localPath=[string]$path
+        $open.Add_Click({Invoke-Safe {Open-PackPath $localPath}}.GetNewClosure())
+        $rename.Add_Click({Invoke-Safe {Rename-RecentProject $localPath}}.GetNewClosure())
+        $remove.Add_Click({Invoke-Safe {Remove-RecentProject $localPath}}.GetNewClosure())
+        [void]$actions.Children.Add($open);[void]$actions.Children.Add($rename);[void]$actions.Children.Add($remove)
+        [Windows.Controls.Grid]::SetColumn($actions,1);[void]$panel.Children.Add($actions)
         $item.Content=$panel
         [void]$lstRecentProjects.Items.Add($item)
     }
     $lblNoProjects.Visibility=if($lstRecentProjects.Items.Count -eq 0){'Visible'}else{'Collapsed'}
+    if($lblHomeProjects){$lblHomeProjects.Text=[string]$lstRecentProjects.Items.Count}
+}
+
+function Go-Home {
+    if($script:PackPath){Save-State}
+    $mainContent.Visibility='Collapsed'
+    $emptyState.Visibility='Visible'
+    $btnHome.Visibility='Collapsed'
+    $lblPackName.Text='Meus projetos'
+    $lblPackPath.Text=''
+    Refresh-RecentProjects
 }
 
 function Save-State {
-    if (-not $script:PackPath) { return }
+    if (-not $script:PackPath -or $script:AllowStateSave -eq $false) { return }
     if($txtAddonName){$script:AddonNameSaved=[string]$txtAddonName.Text}
     $obj = [ordered]@{
         version = 9
+        project_name = $script:ProjectName
         pack = $script:PackPath
         index = $script:Index
         total_pieces = @($script:Pieces).Count
@@ -908,6 +1057,7 @@ function Save-State {
             yaw=$script:Yaw; pitch=$script:Pitch; roll=$script:Roll
             scale=$script:ModelScale; offset_x=$script:ModelOffsetX; offset_z=$script:ModelOffsetZ
             camera_distance=$script:CameraDistance
+            light_level=$script:LightLevel
         }
         prop_alignment = $script:PropAlignment
         decisions = $script:Decisions
@@ -925,7 +1075,10 @@ function Save-State {
     try {
         $target=Get-StatePath
         $temp=$target+'.tmp'
-        $obj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temp -Encoding UTF8
+        $json=ConvertTo-Json -InputObject $obj -Depth 10
+        [void]($json | ConvertFrom-Json -ErrorAction Stop)
+        [IO.File]::WriteAllText($temp,$json,[Text.Encoding]::UTF8)
+        if(Test-Path -LiteralPath $target){Copy-Item -LiteralPath $target -Destination ($target+'.bak') -Force}
         Move-Item -LiteralPath $temp -Destination $target -Force
     } catch { Write-AppLog ('Não foi possível salvar o progresso: '+$_.Exception.Message) }
 }
@@ -935,10 +1088,14 @@ function Load-State {
     $script:TextureDeletions = @{}
     $script:CategoryOverrides = @{}
     $script:HideHairSelections = @{}
-    $p = Get-StatePath
-    if ($p -and (Test-Path $p)) {
+    $script:ProjectName=Get-DefaultProjectName $script:PackPath
+    $candidates=@(Get-ProjectStateCandidates $script:PackPath)
+    $script:AllowStateSave=($candidates.Count -eq 0)
+    foreach($p in $candidates){
         try {
-            $o = Get-Content -Raw -LiteralPath $p | ConvertFrom-Json
+            $o = Get-Content -Raw -LiteralPath $p -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if(-not $o -or $null -eq $o.index -or $null -eq $o.decisions){throw 'Estado incompleto.'}
+            $script:Decisions=@{}
             if ($o.decisions) {
                 foreach ($prop in $o.decisions.PSObject.Properties) {
                     $v = [string]$prop.Value
@@ -960,8 +1117,22 @@ function Load-State {
             }
             if($o.prop_alignment){foreach($p in $o.prop_alignment.PSObject.Properties){$script:PropAlignment[$p.Name]=$p.Value}}
             if ($o.addon_name) { $script:AddonNameSaved = [string]$o.addon_name }
-        } catch { Write-AppLog "Estado anterior não pôde ser lido: $($_.Exception.Message)" }
+            if(-not [string]::IsNullOrWhiteSpace([string]$o.project_name)){$script:ProjectName=[string]$o.project_name}
+            $script:AllowStateSave=$true
+            Write-AppLog ('Estado restaurado de '+$p+' com '+$script:Decisions.Count+' decisões.')
+            return
+        } catch { Write-AppLog "Estado anterior em $p não pôde ser lido: $($_.Exception.Message)" }
     }
+    if(-not $script:AllowStateSave){
+        Show-Error 'Os dados do projeto não puderam ser restaurados. Os arquivos antigos foram preservados e o salvamento automático foi suspenso para evitar substituir suas marcações. Consulte a pasta logs.'
+    }
+}
+
+function Get-DefaultProjectName([string]$path){
+    $leaf=Split-Path $path -Leaf
+    if($leaf -ieq 'stream'){$leaf=Split-Path (Split-Path $path -Parent) -Leaf}
+    if([string]::IsNullOrWhiteSpace($leaf)){return 'Meu projeto'}
+    return $leaf
 }
 
 function Get-VariantIndexKey([string]$dir,[string]$prefix,[string]$slot,[int]$num,[string]$kind) {
@@ -1186,6 +1357,15 @@ function New-TextureMaterial($bitmap) {
     $diff = New-Object Windows.Media.Media3D.DiffuseMaterial $brush
     $group = New-Object Windows.Media.Media3D.MaterialGroup
     $group.Children.Add($diff)
+    # Luz de preenchimento independente das normais da malha para recuperar
+    # detalhes de tecidos pretos sem alterar a textura original.
+    $amount=[Math]::Max(0.0,([double]$script:LightLevel-30.0)/70.0)
+    if($amount -gt 0){
+        $glow=New-Object Windows.Media.SolidColorBrush ([Windows.Media.Color]::FromRgb(105,105,110))
+        $glow.Opacity=[Math]::Min(0.55,$amount*0.55)
+        $glow.Freeze()
+        $group.Children.Add((New-Object Windows.Media.Media3D.EmissiveMaterial $glow))
+    }
     $group.Freeze()
     return $group
 }
@@ -1260,10 +1440,23 @@ function Get-ProjectedModelBounds {
 }
 
 function Update-Lighting {
-    if(-not $script:AmbientLight){return}
-    $value=if($sliderLight){[double]$sliderLight.Value}else{50.0}
-    $channel=[byte][Math]::Round([Math]::Max(35,[Math]::Min(255,35+$value*2.2)))
-    $script:AmbientLight.Color=[Windows.Media.Color]::FromRgb($channel,$channel,$channel)
+    $value=[double]$script:LightLevel
+    if($lblLightValue){$lblLightValue.Text="$([int]$value)%"}
+    $channel=[byte][Math]::Round([Math]::Max(50,[Math]::Min(255,50+$value*2.05)))
+    if($script:AmbientLight){$script:AmbientLight.Color=[Windows.Media.Color]::FromRgb($channel,$channel,$channel)}
+    if($viewHost){
+        $bg=[byte][Math]::Round(9+($value/100.0)*43)
+        $viewHost.Background=New-SolidBrush ([string]::Format('#{0:X2}{1:X2}{2:X2}',$bg,$bg,[byte]($bg+3)))
+    }
+    if($script:CurrentTextures -and $script:CurrentTextures.Count -gt 0 -and $script:GeometryEntries.Count -gt 0){
+        Apply-TextureArray $script:CurrentTextures
+    }
+}
+
+function Change-Light([int]$delta){
+    $script:LightLevel=[Math]::Max(0,[Math]::Min(100,[int]$script:LightLevel+$delta))
+    Update-Lighting
+    Save-State
 }
 
 function Update-TransformBoxVisual {
@@ -1417,6 +1610,7 @@ function Build-Viewport([IO.FileInfo]$ydd) {
             if([double]$v.scale -gt 0){$script:ModelScale=[double]$v.scale}
             $script:ModelOffsetX=[double]$v.offset_x;$script:ModelOffsetZ=[double]$v.offset_z
             if([double]$v.camera_distance -gt 0){$script:CameraDistance=[double]$v.camera_distance}
+            if($null -ne $v.light_level){$script:LightLevel=[int]$v.light_level}
             $script:SavedView=$null
         }
     }
@@ -1427,6 +1621,7 @@ function Build-Viewport([IO.FileInfo]$ydd) {
     $viewport.Camera = $script:Camera
     Update-ModelTransform
     Update-Camera
+    $script:CurrentTextures=@()
     Update-Lighting
     Set-NeutralMaterial
 
@@ -1525,6 +1720,7 @@ function Find-TextureForGeometry($textures, [string]$name) {
 }
 
 function Apply-TextureArray($textures) {
+    $script:CurrentTextures=@($textures)
     $script:MaterialBitmapCache = @{}
     foreach ($entry in @($script:GeometryEntries)) {
         $tex = Find-TextureForGeometry $textures $entry.DiffuseTexture
@@ -2048,6 +2244,10 @@ function Open-PackPath([string]$selectedPath) {
         $stage='CARREGANDO ESTADO'
         Load-State
         Ensure-RuntimeCollections
+        if($env:MT_PACK_ORGANIZER_UITEST -ne '1' -and (@(Get-ProjectStateCandidates $script:PackPath)).Count -eq 0){
+            $enteredName=Prompt-ProjectName $script:ProjectName
+            if(-not [string]::IsNullOrWhiteSpace($enteredName)){$script:ProjectName=$enteredName}
+        }
 
         $stage='INDEXANDO ARQUIVOS'
         $lblLoading.Text='LOCALIZANDO PEÇAS E TEXTURAS...'
@@ -2055,11 +2255,12 @@ function Open-PackPath([string]$selectedPath) {
         Build-FileIndex
 
         $stage='ATUALIZANDO INTERFACE'
-        $lblPackName.Text = Split-Path ([string]$script:PackPath) -Leaf
+        $lblPackName.Text = [string]$script:ProjectName
         $lblPackPath.Text = [string]$script:PackPath
         if($script:AddonNameSaved){$txtAddonName.Text=Convert-ToAddonName ([string]$script:AddonNameSaved)}else{$txtAddonName.Text=Get-DefaultAddonName}
         $emptyState.Visibility = 'Collapsed'
         $mainContent.Visibility = 'Visible'
+        $btnHome.Visibility='Visible'
 
         $stage='ABRINDO PRIMEIRA PEÇA'
         $lblLoading.Text='ABRINDO A PRIMEIRA PEÇA...'
@@ -2844,14 +3045,29 @@ $xamlText = @'
             <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.0.0" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="Nenhum pack aberto" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓" Width="28" Height="42" Margin="0,0,7,0" Padding="0" FontSize="24" FontWeight="Bold" Visibility="Collapsed" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" Foreground="#B52BFF" ToolTip="Atualização disponível">
     <Button.Template><ControlTemplate TargetType="Button"><Grid Background="Transparent"><TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" FontWeight="{TemplateBinding FontWeight}" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock.Effect><DropShadowEffect Color="#A320FF" BlurRadius="7" ShadowDepth="0" Opacity="0.55"/></TextBlock.Effect></TextBlock></Grid><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="#E3A6FF"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.72"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
-</Button><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
+</Button><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Path Width="20" Height="20" Stretch="Uniform" Fill="#D88BFF" Data="M 12,2 L 2,11 L 5,11 L 5,21 L 10,21 L 10,15 L 14,15 L 14,21 L 19,21 L 19,11 L 22,11 Z"/></Button><Button Name="btnOpen" Content="ABRIR PACK" Width="130" Height="42"/></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
     </Border>
 
-    <Grid Grid.Row="2" Name="emptyState">
-        <Border Width="560" Padding="34" Background="#0D0D10" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="16" HorizontalAlignment="Center" VerticalAlignment="Center">
-            <StackPanel><Image Name="imgEmptyLogo" Width="245" Height="105" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Text="PACK ORGANIZER" FontSize="27" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,18,0,0"/><TextBlock Text="Abra a pasta stream para visualizar as roupas, revisar texturas e montar o add-on." Foreground="#8E8992" TextAlignment="Center" TextWrapping="Wrap" Margin="45,8,45,0"/><Border Background="#160A1F" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="60,20,60,0"><TextBlock Text="Tudo é processado localmente no seu computador." Foreground="#D88BFF" FontSize="10" HorizontalAlignment="Center"/></Border><TextBlock Text="MEUS PROJETOS" Foreground="#D88BFF" FontSize="11" FontWeight="Bold" Margin="0,22,0,9"/><TextBlock Name="lblNoProjects" Text="Nenhum projeto recente. Clique em ABRIR PACK para começar." Foreground="#817A89" FontSize="10"/><ListBox Name="lstRecentProjects" MaxHeight="250" ToolTip="Clique duas vezes para continuar um projeto na última peça visualizada"/></StackPanel>
+    <Grid Grid.Row="2" Name="emptyState" Margin="28,18">
+        <Border MaxWidth="1120" Background="#0D0D11" BorderBrush="#302439" BorderThickness="1" CornerRadius="18" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="28">
+            <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="SEUS PROJETOS" FontSize="29" FontWeight="Bold"/><TextBlock Text="Organize seus packs e continue exatamente de onde parou." Foreground="#A19AA8" FontSize="13" Margin="0,8,0,0"/></StackPanel>
+                    <Button Name="btnNewProject" Grid.Column="1" Content="+  NOVO PROJETO" Height="45" Width="180" Background="#A432DC" BorderBrush="#C070F0" FontWeight="Bold"/>
+                </Grid>
+                <Grid Grid.Row="1" Margin="0,25,0,17"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <Border Background="#1A1120" BorderBrush="#4A265C" BorderThickness="1" Padding="18" CornerRadius="12" Margin="0,0,8,0"><StackPanel><TextBlock Text="PROJETOS SALVOS" Foreground="#B586CE" FontWeight="Bold" FontSize="10"/><TextBlock Name="lblHomeProjects" Text="0" FontSize="29" FontWeight="Bold" Margin="0,5,0,0"/></StackPanel></Border>
+                    <Border Grid.Column="1" Background="#151319" BorderBrush="#333039" BorderThickness="1" Padding="18" CornerRadius="12" Margin="8,0,0,0"><StackPanel><TextBlock Text="CONTINUE SUA ORGANIZAÇÃO" Foreground="#B586CE" FontWeight="Bold" FontSize="10"/><TextBlock Text="Suas decisões ficam salvas automaticamente" Foreground="#FFFFFF" FontSize="14" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                </Grid>
+                <Border Grid.Row="2" Background="#111115" CornerRadius="12" BorderBrush="#2E2933" BorderThickness="1" Padding="17">
+                    <DockPanel><TextBlock DockPanel.Dock="Top" Text="PROJETOS RECENTES" FontSize="12" FontWeight="Bold" Foreground="#D88BFF" Margin="0,0,0,12"/>
+                    <TextBlock Name="lblNoProjects" DockPanel.Dock="Top" Text="Nenhum projeto por enquanto. Clique em NOVO PROJETO para começar." Foreground="#A59AA8" FontSize="13" Margin="0,15,0,0" Visibility="Collapsed"/>
+                    <ListBox Name="lstRecentProjects" Background="Transparent" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto" ToolTip="Use CONTINUAR para retomar um projeto"/></DockPanel>
+                </Border>
+                <Image Name="imgEmptyLogo" Visibility="Collapsed"/>
+            </Grid>
         </Border>
     </Grid>
 
@@ -2875,25 +3091,29 @@ $xamlText = @'
 
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
-            <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="12,8" CornerRadius="8" Background="#D0141417"><StackPanel Orientation="Horizontal"><TextBlock Text="LUZ" Foreground="#D88BFF" FontWeight="Bold" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/><Slider Name="sliderLight" Width="130" Minimum="0" Maximum="100" Value="50" ToolTip="Intensidade da iluminação ambiente"/></StackPanel></Border>
+            <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="10,7" CornerRadius="10" Background="#19141F" BorderBrush="#543064" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="☀" Foreground="#D88BFF" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="ILUMINAÇÃO" Foreground="#DCC3E8" FontWeight="Bold" FontSize="9" VerticalAlignment="Center" Margin="0,0,9,0"/><Button Name="btnLightDown" Content="−" Width="29" Height="28" Padding="0" FontSize="17"/><Border Background="#261B2C" CornerRadius="5" Width="48" Margin="5,0" Padding="2" VerticalAlignment="Center"><TextBlock Name="lblLightValue" Text="50%" FontSize="11" FontWeight="Bold" TextAlignment="Center" Foreground="#FFFFFF"/></Border><Button Name="btnLightUp" Content="+" Width="29" Height="28" Padding="0" FontSize="16"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
-                <Border BorderBrush="#B16BE0" BorderThickness="1.25" Opacity="0.96"/>
-                <Rectangle Name="rotNW" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0" Cursor="Hand" ToolTip="Rotacionar"/>
-                <Rectangle Name="rotNE" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0" Cursor="Hand" ToolTip="Rotacionar"/>
-                <Rectangle Name="rotSW" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6" Cursor="Hand" ToolTip="Rotacionar"/>
-                <Rectangle Name="rotSE" Width="11" Height="11" Fill="#111116" Stroke="#D69BFA" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6" Cursor="Hand" ToolTip="Rotacionar"/>
-                <Rectangle Name="rotTop" Width="30" Height="7" RadiusX="2" RadiusY="2" Fill="#B96FE7" Stroke="#E7C4FF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-4,0,0" Cursor="Hand" ToolTip="Girar no eixo X"/>
-                <Rectangle Name="rotBottom" Width="30" Height="7" RadiusX="2" RadiusY="2" Fill="#B96FE7" Stroke="#E7C4FF" StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-4" Cursor="Hand" ToolTip="Girar no eixo X"/>
-                <Rectangle Name="rotLeft" Width="7" Height="30" RadiusX="2" RadiusY="2" Fill="#B96FE7" Stroke="#E7C4FF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-4,0,0,0" Cursor="Hand" ToolTip="Girar no eixo Y"/>
-                <Rectangle Name="rotRight" Width="7" Height="30" RadiusX="2" RadiusY="2" Fill="#B96FE7" Stroke="#E7C4FF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-4,0" Cursor="Hand" ToolTip="Girar no eixo Y"/>
-                <Grid Width="116" Height="116" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
-                    <Ellipse Name="gizmoRoll" Width="88" Height="88" Stroke="#9650C8" StrokeThickness="2" Opacity="0.76" Cursor="Hand" ToolTip="Rotacionar em Z"/>
-                    <Ellipse Name="gizmoYaw" Width="108" Height="28" Stroke="#C174F0" StrokeThickness="3" Opacity="0.92" Cursor="Hand" ToolTip="Rotacionar em Y"/>
-                    <Ellipse Name="gizmoPitch" Width="28" Height="108" Stroke="#C174F0" StrokeThickness="3" Opacity="0.92" Cursor="Hand" ToolTip="Rotacionar em X"/>
-                    <Ellipse Width="13" Height="13" Fill="#DCA8FF" Stroke="#FFFFFF" StrokeThickness="1.2" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Border BorderBrush="#B8B5B8" BorderThickness="1.2" Opacity="0.78"/>
+                <Ellipse Name="rotNW" Width="10" Height="10" Fill="#ECD9B4" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-5,-5,0,0" Cursor="SizeNWSE" ToolTip="Redimensionar"/>
+                <Ellipse Name="rotNE" Width="10" Height="10" Fill="#ECD9B4" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0" Cursor="SizeNESW" ToolTip="Redimensionar"/>
+                <Ellipse Name="rotSW" Width="10" Height="10" Fill="#ECD9B4" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-5,0,0,-5" Cursor="SizeNESW" ToolTip="Redimensionar"/>
+                <Ellipse Name="rotSE" Width="10" Height="10" Fill="#ECD9B4" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-5,-5" Cursor="SizeNWSE" ToolTip="Redimensionar"/>
+                <Rectangle Name="rotTop" Width="24" Height="5" RadiusX="2" RadiusY="2" Fill="#D7D2D7" Stroke="#FFFFFF" StrokeThickness="0.5" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-3,0,0" Cursor="Hand" ToolTip="Girar no eixo X"/>
+                <Rectangle Name="rotBottom" Width="24" Height="5" RadiusX="2" RadiusY="2" Fill="#D7D2D7" Stroke="#FFFFFF" StrokeThickness="0.5" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-3" Cursor="Hand" ToolTip="Girar no eixo X"/>
+                <Rectangle Name="rotLeft" Width="5" Height="24" RadiusX="2" RadiusY="2" Fill="#D7D2D7" Stroke="#FFFFFF" StrokeThickness="0.5" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-3,0,0,0" Cursor="Hand" ToolTip="Girar no eixo Y"/>
+                <Rectangle Name="rotRight" Width="5" Height="24" RadiusX="2" RadiusY="2" Fill="#D7D2D7" Stroke="#FFFFFF" StrokeThickness="0.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-3,0" Cursor="Hand" ToolTip="Girar no eixo Y"/>
+                <Grid Width="144" Height="144" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
+                    <Ellipse Name="gizmoRoll" Width="102" Height="102" Stroke="#E4CD34" StrokeThickness="2.5" Opacity="0.96" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
+                    <Ellipse Name="gizmoYaw" Width="119" Height="39" Stroke="#E2BB34" StrokeThickness="2" Opacity="0.75" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
+                    <Ellipse Name="gizmoPitch" Width="39" Height="119" Stroke="#96A8B9" StrokeThickness="1.7" Opacity="0.45" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
+                    <Line Name="axisX" X1="72" Y1="72" X2="128" Y2="72" Stroke="#F05F68" StrokeThickness="4" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
+                    <Polygon Name="axisXHead" Points="128,66 142,72 128,78" Fill="#F05F68" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
+                    <Line Name="axisZ" X1="72" Y1="72" X2="72" Y2="16" Stroke="#55D978" StrokeThickness="4" Cursor="SizeNS" ToolTip="Mover no eixo Z"/>
+                    <Polygon Name="axisZHead" Points="66,16 72,2 78,16" Fill="#55D978" Cursor="SizeNS" ToolTip="Mover no eixo Z"/>
+                    <Ellipse Width="14" Height="14" Fill="#D7DEE8" Stroke="#495260" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
-            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Text="Clique na peça para selecionar • extremidades roxas = rotação por eixo • Shift = encaixe 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Text="Clique para selecionar • cantos = escala • setas = mover • anéis = girar • Shift = 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
         </Grid></Border>
 
         <Border Grid.Column="4" Background="#111114" CornerRadius="13" BorderBrush="#2D2931" BorderThickness="1" Padding="15"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
@@ -2932,9 +3152,9 @@ try {
 }
 
 foreach($n in @(
-    'btnOpen','btnUpdate','lblPackName','lblPackPath','emptyState','mainContent',
+    'btnOpen','btnUpdate','btnHome','btnNewProject','lblHomeProjects','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','sliderLight','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','axisX','axisXHead','axisZ','axisZHead','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -2946,6 +3166,8 @@ $script:Decisions = @{}
 $script:TextureDeletions = @{}
 $script:Index = 0
 $script:SavedView=$null
+$script:LightLevel=50
+$script:CurrentTextures=@()
 $script:TextureCache = @{}
 $script:TextureCacheOrder = @()
 $script:TextureInfoCache = @{}
@@ -2960,7 +3182,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.24'
+$script:AppVersion = '0.9.25'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3043,9 +3265,12 @@ public static class MtNativeWindow {
 } catch { Write-AppLog ('Logo/assets: '+$_.Exception.Message) }
 
 $btnOpen.Add_Click({ Invoke-Safe { Open-Pack } })
+$btnNewProject.Add_Click({ Invoke-Safe { Open-Pack } })
+$btnHome.Add_Click({ Invoke-Safe { Go-Home } })
 $btnPropYaw.Add_Click({ Invoke-Safe { Rotate-PropPreview 'Yaw' } })
 $btnPropPitch.Add_Click({ Invoke-Safe { Rotate-PropPreview 'Pitch' } })
-$sliderLight.Add_ValueChanged({ Update-Lighting })
+$btnLightDown.Add_Click({ Invoke-Safe { Change-Light -15 } })
+$btnLightUp.Add_Click({ Invoke-Safe { Change-Light 15 } })
 $lstRecentProjects.Add_MouseDoubleClick({
     if($lstRecentProjects.SelectedItem){
         $path=[string]$lstRecentProjects.SelectedItem.Tag
@@ -3128,13 +3353,15 @@ foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({para
 $gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e})
 $gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
 $gizmoRoll.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
+foreach($h in @($axisX,$axisXHead)){$h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_X' $e})}
+foreach($h in @($axisZ,$axisZHead)){$h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Z' $e})}
 foreach($g in @($gizmoYaw,$gizmoPitch,$gizmoRoll)) {
-    $g.Add_MouseEnter({param($s,$e); $s.Stroke=New-SolidBrush '#E7C3FF'; $s.StrokeThickness=4})
-    $g.Add_MouseLeave({param($s,$e); $s.Stroke=New-SolidBrush '#B76AE8'; $s.StrokeThickness=3})
+    $g.Add_MouseEnter({param($s,$e); $s.StrokeThickness=4})
+    $g.Add_MouseLeave({param($s,$e); $s.StrokeThickness=2})
 }
 foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE,$rotTop,$rotBottom,$rotLeft,$rotRight)) {
-    $h.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#E6B8FF'; $s.Stroke=New-SolidBrush '#FFFFFF'; $s.Opacity=1.0})
-    $h.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#B96FE7'; $s.Stroke=New-SolidBrush '#E7C4FF'; $s.Opacity=0.96})
+    $h.Add_MouseEnter({param($s,$e); $s.Fill=New-SolidBrush '#FFFFFF'; $s.Opacity=1.0})
+    $h.Add_MouseLeave({param($s,$e); $s.Fill=New-SolidBrush '#E9D9BB'; $s.Opacity=0.90})
 }
 
 
@@ -3176,10 +3403,10 @@ $viewHost.Add_MouseMove({
         $p=$e.GetPosition($viewHost)
         if($script:TransformDragMode){
             $dx=$p.X-$script:TransformStart.X; $dy=$p.Y-$script:TransformStart.Y
-            if($script:TransformDragMode -eq 'MOVE'){
+            if($script:TransformDragMode -in @('MOVE','MOVE_X','MOVE_Z')){
                 $w=[Math]::Max(300,$viewHost.ActualWidth); $h=[Math]::Max(300,$viewHost.ActualHeight)
-                $script:ModelOffsetX=$script:TransformStartX + ($dx/$w)*$script:ModelExtent*2.2
-                $script:ModelOffsetZ=$script:TransformStartZ - ($dy/$h)*$script:ModelExtent*2.2
+                if($script:TransformDragMode -ne 'MOVE_Z'){$script:ModelOffsetX=$script:TransformStartX + ($dx/$w)*$script:ModelExtent*2.2}
+                if($script:TransformDragMode -ne 'MOVE_X'){$script:ModelOffsetZ=$script:TransformStartZ - ($dy/$h)*$script:ModelExtent*2.2}
                 $script:TransformScreenX=$script:TransformStartScreenX+$dx
                 $script:TransformScreenY=$script:TransformStartScreenY+$dy
             } elseif($script:TransformDragMode -eq 'SCALE') {
@@ -3261,20 +3488,53 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
     $win.Show()
     [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
     $fixture=Join-Path ([IO.Path]::GetTempPath()) ('MTPO_UI_TEST_'+[Guid]::NewGuid().ToString('N'))
+    $legacyFixture=$fixture+'_legacy'
     try {
         [void](New-Item -ItemType Directory -Path $fixture -Force)
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_000_u.ydd'),[byte[]](1,2,3,4))
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_001_u.ydd'),[byte[]](1,2,3,4))
         Open-PackPath $fixture
         if($script:Pieces.Count -ne 2){throw 'O projeto de teste não indexou as duas peças.'}
-        Navigate-Piece 1
+        Mark-Current 'MANTER'
         if($script:Index -ne 1){throw 'O projeto de teste não navegou após YDD inválida.'}
+        Mark-Current 'EXCLUIR'
         if(-not (Test-Path -LiteralPath (Get-StatePath))){throw 'O projeto de teste não salvou seu estado.'}
         $saved=Get-Content -LiteralPath (Get-StatePath) -Raw | ConvertFrom-Json
         if([int]$saved.index -ne 1){throw 'O projeto de teste não atualizou o índice salvo.'}
+        Go-Home
+        if(-not [string]::IsNullOrWhiteSpace($env:MT_PACK_ORGANIZER_SCREENSHOT)){
+            try {
+                $win.UpdateLayout()
+                $w=[int]$win.ActualWidth;$h=[int]$win.ActualHeight
+                $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap $w,$h,96,96,([Windows.Media.PixelFormats]::Pbgra32)
+                $bitmap.Render($win)
+                $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder
+                $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+                $output=[IO.File]::Create($env:MT_PACK_ORGANIZER_SCREENSHOT)
+                try{$encoder.Save($output)}finally{$output.Dispose()}
+                Write-Host 'MT_PACK_ORGANIZER_UI_PREVIEW_OK'
+            } catch {Write-Host ('Captura opcional não disponível: '+$_.Exception.Message)}
+        }
+        Open-PackPath $fixture
+        if($script:Index -ne 1 -or $script:Decisions.Count -ne 2){throw 'O progresso foi perdido ao reabrir o projeto.'}
+        if($script:Decisions[$script:Pieces[0].FullName] -ne 'MANTER' -or $script:Decisions[$script:Pieces[1].FullName] -ne 'EXCLUIR'){
+            throw 'As marcações de manter/excluir foram perdidas ao reabrir o projeto.'
+        }
+        [void](New-Item -ItemType Directory -Path $legacyFixture -Force)
+        $oldYdd=Join-Path $legacyFixture 'jbib_005_u.ydd'
+        [IO.File]::WriteAllBytes($oldYdd,[byte[]](1,2,3,4))
+        $legacyDecisions=@{};$legacyDecisions[$oldYdd]='EXCLUIR'
+        $legacyData=[ordered]@{version=9;pack=$legacyFixture;index=0;decisions=$legacyDecisions;total_pieces=1}
+        $legacyData | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $legacyFixture '_MT_PACK_ORGANIZER_STATE.json') -Encoding UTF8
+        Open-PackPath $legacyFixture
+        if($script:Decisions.Count -ne 1 -or $script:Decisions[$oldYdd] -ne 'EXCLUIR'){
+            throw 'O estado antigo dentro da stream não foi recuperado.'
+        }
+        if(-not (Test-Path -LiteralPath (Get-StatePath))){throw 'Migração do estado antigo não criou estado novo.'}
     } finally {
         $win.Close()
         if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
+        if(Test-Path -LiteralPath $legacyFixture){Remove-Item -LiteralPath $legacyFixture -Recurse -Force}
     }
     Write-Host 'MT_PACK_ORGANIZER_UI_SELFTEST_OK'
     exit 0
