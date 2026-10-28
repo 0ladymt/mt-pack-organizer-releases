@@ -1017,9 +1017,9 @@ function Refresh-RecentProjects {
         $pathText.Margin='0,8,0,0';$pathText.TextTrimming='CharacterEllipsis';[void]$left.Children.Add($pathText)
         [Windows.Controls.Grid]::SetColumn($left,0);[void]$panel.Children.Add($left)
         $actions=New-Object Windows.Controls.StackPanel;$actions.Orientation='Vertical';$actions.Margin='22,0,0,0'
-        $open=New-Object Windows.Controls.Button;$open.Content='CONTINUAR  ›';$open.Width=125;$open.Height=36
-        $rename=New-Object Windows.Controls.Button;$rename.Content='RENOMEAR';$rename.Width=125;$rename.Height=30;$rename.Margin='0,7,0,0'
-        $remove=New-Object Windows.Controls.Button;$remove.Content='EXCLUIR PROJETO';$remove.Width=125;$remove.Height=30;$remove.Margin='0,7,0,0'
+        $open=New-Object Windows.Controls.Button;$open.Content='CONTINUAR  ›';$open.Width=125;$open.Height=36;$open.Padding='2'
+        $rename=New-Object Windows.Controls.Button;$rename.Content='RENOMEAR';$rename.Width=125;$rename.Height=34;$rename.Padding='2';$rename.Margin='0,7,0,0'
+        $remove=New-Object Windows.Controls.Button;$remove.Content='EXCLUIR PROJETO';$remove.Width=125;$remove.Height=34;$remove.Padding='2';$remove.Margin='0,7,0,0'
         $remove.Foreground=New-SolidBrush '#FF9CA4'
         $localPath=[string]$path
         $open.Add_Click({Invoke-Safe {Open-PackPath $localPath}}.GetNewClosure())
