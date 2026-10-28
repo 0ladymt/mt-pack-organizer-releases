@@ -1,12 +1,12 @@
-MT Pack Organizer 0.9.24
+MT Pack Organizer 0.9.25
 
-- Novo painel de projetos recentes: contagens manter/excluir, progresso e retomada da última peça.
-- Salva enquadramento, zoom, rotação e posição para continuar o projeto depois de fechar.
-- Iluminação ambiente ajustável para peças muito escuras.
-- Tenta mostrar texturas incorporadas aos arquivos YDD quando não há uma YTD separada.
-- Chapéus e óculos têm pré-orientação na visualização e controles de ajuste de inclinação e direção (sem alterar o arquivo).
-- Corrigida a atribuição dos cantos da caixa delimitadora à escala e estabilizadas suas dimensões durante rotação.
-- Corrigida a prévia de textura que piscava durante o hover.
-- Erros em um YDD ou YTD são registrados sem impedir a navegação pelas demais peças.
-- Ícone do aplicativo e dos atalhos padronizado com borboleta e fundo preto.
-- Preserva o gerador FiveM e as correções de prefixos, renumeração de texturas e divisão por DLC da versão 0.9.23.
+- Correção crítica do progresso: migração do estado antigo da stream para a pasta do aplicativo, recuperação com cópia de segurança e bloqueio contra sobrescrever dados ilegíveis.
+- Testes de reabertura confirmam que as marcações MANTER/EXCLUIR e o índice são restaurados.
+- Nova página inicial em formato de painel, com cartões, progresso e ações CONTINUAR, RENOMEAR e REMOVER.
+- Projetos recebem nomes próprios; ao criar, é possível informar o nome. O padrão é o nome do pack, não 'stream'.
+- Botão de casinha no cabeçalho para voltar aos projetos.
+- REMOVER tira o projeto do painel sem apagar roupas nem progresso salvo.
+- Iluminação redesenhada com botões e melhoria de contraste para roupas pretas.
+- Caixa de transformação com moldura discreta, marcadores claros, setas coloridas e anéis de rotação inspirados no Photoshop.
+- Apenas uma instância do aplicativo por vez.
+- Preserva as correções de texturas embutidas, tratamento de RSC7 e geração FiveM.
