@@ -1,3 +1,9 @@
+MT Pack Organizer 0.9.30
+
+- Carregamento de projeto não herda o desfoque do diálogo de nomeação; o fundo volta ao foco antes da mensagem de indexação.
+- Cabeçalho da página inicial não mostra mais o texto redundante "Meus projetos"; o nome e caminho do pack aparecem somente dentro do projeto.
+- Teste de interface verifica a ausência do desfoque durante o carregamento e o cabeçalho limpo na página inicial.
+
 MT Pack Organizer 0.9.25
 
 - Correção crítica do progresso: migração do estado antigo da stream para a pasta do aplicativo, recuperação com cópia de segurança e bloqueio contra sobrescrever dados ilegíveis.
