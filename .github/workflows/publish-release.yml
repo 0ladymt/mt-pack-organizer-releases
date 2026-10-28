@@ -311,6 +311,15 @@ jobs:
           Pop-Location
           if (-not (Test-Path "build\installer\MT_Pack_Organizer_Setup_$env:VERSION.exe")) { throw "Instalador não foi compilado." }
 
+      - name: Guardar instalador de teste sem publicar
+        if: github.event_name == 'pull_request' && steps.existing.outputs.exists != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MT-Pack-Organizer-preview
+          path: build/installer/MT_Pack_Organizer_Setup_*.exe
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publicar Release automaticamente
         if: github.event_name == 'push' && steps.existing.outputs.exists != 'true'
         shell: pwsh
