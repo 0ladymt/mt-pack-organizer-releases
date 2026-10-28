@@ -725,6 +725,70 @@ public static class MtRageParser
         return result.ToArray();
     }
 
+    // Alguns YDDs guardam os recursos de textura dentro dos próprios shaders.
+    // Reutilizamos o leitor de textura RSC7, sem depender de uma YTD externa.
+    public static TextureResult[] LoadEmbeddedTextures(string path)
+    {
+        Rsc r = ReadRsc(path);
+        List<ulong> drawables = new List<ulong>();
+        if (r.SystemData.Length >= 0x40)
+        {
+            int count = U16(r.SystemData, 0x38);
+            byte[] arr = count > 0 && count < 4096 ? r.Resolve(U64(r.SystemData, 0x30), count * 8) : null;
+            if (arr != null) for (int i = 0; i < count; i++) drawables.Add(U64(arr, i * 8));
+        }
+        if (drawables.Count == 0) drawables.Add(SYSTEM_BASE);
+
+        HashSet<ulong> seen = new HashSet<ulong>();
+        List<TextureResult> results = new List<TextureResult>();
+        foreach (ulong drawablePtr in drawables)
+        {
+            byte[] drawable = r.Resolve(drawablePtr, 0xD0);
+            if (drawable == null) continue;
+            byte[] group = r.Resolve(U64(drawable, 0x10), 0x40);
+            if (group == null) continue;
+            int shaderCount = U16(group, 0x18);
+            byte[] shaderPtrs = shaderCount > 0 && shaderCount < 2048 ? r.Resolve(U64(group, 0x10), shaderCount * 8) : null;
+            if (shaderPtrs == null) continue;
+            for (int si = 0; si < shaderCount; si++)
+            {
+                byte[] shader = r.Resolve(U64(shaderPtrs, si * 8), 0x30);
+                if (shader == null) continue;
+                ulong paramPtr = U64(shader, 0);
+                int paramCount = shader[0x10];
+                byte[] parameters = paramPtr != 0 && paramCount > 0 ? r.Resolve(paramPtr, paramCount * 16) : null;
+                if (parameters == null) continue;
+                for (int pi = 0; pi < paramCount; pi++)
+                {
+                    if (parameters[pi * 16] != 0) continue;
+                    ulong texturePtr = U64(parameters, pi * 16 + 8);
+                    if (texturePtr == 0 || !seen.Add(texturePtr)) continue;
+                    byte[] tr = r.Resolve(texturePtr, 0x90);
+                    if (tr == null) continue;
+                    TexInfo ti = new TexInfo();
+                    ti.Name = r.StringAt(U64(tr, 0x28));
+                    ti.Width = U16(tr, 0x50); ti.Height = U16(tr, 0x52);
+                    ti.Stride = U16(tr, 0x56); ti.Format = U32(tr, 0x58);
+                    ti.Levels = tr[0x5D]; ti.DataPtr = U64(tr, 0x70);
+                    ti.Usage = U32(tr, 0x40) & 0x1F;
+                    if (ti.Width < 1 || ti.Height < 1 || ti.Width > 8192 || ti.Height > 8192 || ti.DataPtr == 0) continue;
+                    try
+                    {
+                        byte[] pixels = DecodeTexture(r, ti);
+                        BitmapSource bmp = BitmapSource.Create(ti.Width, ti.Height, 96, 96, PixelFormats.Bgra32, null, pixels, ti.Width * 4);
+                        bmp.Freeze();
+                        TextureResult result = new TextureResult();
+                        result.Name = ti.Name; result.Width = ti.Width; result.Height = ti.Height;
+                        result.Format = ti.Format; result.Usage = ti.Usage; result.Bitmap = bmp;
+                        results.Add(result);
+                    }
+                    catch { /* formato de textura não suportado: tentar as demais */ }
+                }
+            }
+        }
+        return results.ToArray();
+    }
+
     public static BitmapSource BitmapForRenderBucket(BitmapSource input, int renderBucket)
     {
         int w=input.PixelWidth, h=input.PixelHeight, stride=w*4;
@@ -1415,31 +1479,35 @@ function Find-TextureForGeometry($textures, [string]$name) {
     return $textures[0]
 }
 
+function Apply-TextureArray($textures) {
+    $script:MaterialBitmapCache = @{}
+    foreach ($entry in @($script:GeometryEntries)) {
+        $tex = Find-TextureForGeometry $textures $entry.DiffuseTexture
+        if ($null -eq $tex) {
+            $neutral = New-SolidMaterial '#8D8D92'
+            $entry.Model.Material = $neutral; $entry.Model.BackMaterial = $neutral; continue
+        }
+        $cacheKey = ([string]$tex.Name) + '|' + [string]$entry.RenderBucket
+        if (-not $script:MaterialBitmapCache.ContainsKey($cacheKey)) {
+            $bmp = [MtRageParser]::BitmapForRenderBucket($tex.Bitmap,[int]$entry.RenderBucket)
+            $script:MaterialBitmapCache[$cacheKey] = New-TextureMaterial $bmp
+        }
+        $mat = $script:MaterialBitmapCache[$cacheKey]
+        $entry.Model.Material = $mat; $entry.Model.BackMaterial = $mat
+    }
+    $main = if ($textures.Count -gt 0) { $textures[0] } else { $null }
+    if ($main) {
+        $fmt = Get-PixelFormatName ([uint32]$main.Format)
+        $lblTextureInfo.Text = "$($main.Width)×$($main.Height)  •  $fmt  •  $($main.Name)"
+    }
+}
+
 function Apply-TextureItem($item) {
     if ($null -eq $item -or $null -eq $item.Tag -or [string]::IsNullOrWhiteSpace([string]$item.Tag)) { return }
     $file = New-Object IO.FileInfo ([string]$item.Tag)
     try {
         $textures = @(Get-TexturesCached $file)
-        $script:MaterialBitmapCache = @{}
-        foreach ($entry in @($script:GeometryEntries)) {
-            $tex = Find-TextureForGeometry $textures $entry.DiffuseTexture
-            if ($null -eq $tex) {
-                $neutral = New-SolidMaterial '#8D8D92'
-                $entry.Model.Material = $neutral; $entry.Model.BackMaterial = $neutral; continue
-            }
-            $cacheKey = ([string]$tex.Name) + '|' + [string]$entry.RenderBucket
-            if (-not $script:MaterialBitmapCache.ContainsKey($cacheKey)) {
-                $bmp = [MtRageParser]::BitmapForRenderBucket($tex.Bitmap,[int]$entry.RenderBucket)
-                $script:MaterialBitmapCache[$cacheKey] = New-TextureMaterial $bmp
-            }
-            $mat = $script:MaterialBitmapCache[$cacheKey]
-            $entry.Model.Material = $mat; $entry.Model.BackMaterial = $mat
-        }
-        $main = if ($textures.Count -gt 0) { $textures[0] } else { $null }
-        if ($main) {
-            $fmt = Get-PixelFormatName ([uint32]$main.Format)
-            $lblTextureInfo.Text = "$($main.Width)×$($main.Height)  •  $fmt  •  $($main.Name)"
-        }
+        Apply-TextureArray $textures
     } catch {
         Write-AppLog $_.Exception.ToString(); $lblTextureInfo.Text = 'Não foi possível abrir esta YTD'; Set-NeutralMaterial
     }
@@ -1474,6 +1542,20 @@ function Populate-Textures([IO.FileInfo]$ydd) {
         $lstTextures.Items.Clear()
         $vars = @(Find-Variants $ydd)
         if ($vars.Count -eq 0) {
+            # PEDs e alguns acessórios possuem texturas embutidas no próprio YDD.
+            # Aplicamos essas texturas sem oferecê-las para exclusão individual.
+            try {
+                $embedded=@([MtRageParser]::LoadEmbeddedTextures($ydd.FullName))
+                if($embedded.Count -gt 0){
+                    Apply-TextureArray $embedded
+                    $empty=New-Object Windows.Controls.ListBoxItem
+                    $empty.Content="Texturas incorporadas ao PED ($($embedded.Count))"
+                    $empty.IsEnabled=$false
+                    [void]$lstTextures.Items.Add($empty)
+                    $lblTextureCount.Text="$($embedded.Count) TEXTURAS EMBUTIDAS"
+                    return
+                }
+            } catch { Write-AppLog ('Texturas embutidas '+$ydd.Name+': '+$_.Exception.Message) }
             $empty = New-Object Windows.Controls.ListBoxItem
             $empty.Content = 'Sem texturas associadas'
             $empty.IsEnabled = $false
@@ -1685,7 +1767,12 @@ function Load-CurrentPiece {
         $viewport.Children.Clear();$script:ModelRoot=$null;$script:ModelBounds=$null
         $lblMesh.Text='Não foi possível visualizar esta peça (arquivo inválido ou incompatível).'
     }
-    Populate-Textures $ydd
+    try { Populate-Textures $ydd }
+    catch {
+        Write-AppLog ('Falha ao carregar texturas '+$ydd.FullName+': '+$_.Exception.ToString())
+        $lstTextures.Items.Clear();$lblTextureCount.Text='0 TEXTURAS'
+        $lblTextureInfo.Text='Não foi possível ler as texturas desta peça.'
+    }
     Update-Decision
     Update-Stats
     Save-State
