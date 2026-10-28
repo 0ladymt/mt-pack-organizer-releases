@@ -36,3 +36,9 @@ jobs:
           $env:MT_PACK_ORGANIZER_FORCE_NUGET_NETSTANDARD='1'
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File src/MT_Pack_Organizer.ps1
           if($LASTEXITCODE -ne 0){throw "Self-test falhou com código $LASTEXITCODE"}
+      - name: Teste de inicialização da interface Windows
+        shell: pwsh
+        run: |
+          $env:MT_PACK_ORGANIZER_UITEST='1'
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File src/MT_Pack_Organizer.ps1
+          if($LASTEXITCODE -ne 0){throw "Interface WPF falhou com código $LASTEXITCODE"}
