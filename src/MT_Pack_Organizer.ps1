@@ -1731,12 +1731,12 @@ function Invoke-TransformGizmoSelfTest {
             (Get-TransformHoverMode 165 7 330 440),
             (Get-TransformHoverMode 165 220 330 440)
         )
-        if(($zones -join ',') -ne 'ROTATE_ROLL,ROTATE_YAW,ROTATE_PITCH,MOVE_Z'){
+        if(($zones -join ',') -ne 'ROTATE_ROLL,ROTATE_YAW,ROTATE_PITCH,'){
             throw ('Os quadrantes não mapearam os controles do Photoshop: '+($zones -join ','))
         }
         Set-TransformHover 'ROTATE_ROLL'
         Save-TransformGizmoPreview 'cantos'
-        if($hoverNW.Visibility -ne 'Visible' -or $hoverLeft.Visibility -ne 'Collapsed' -or $transformHoverPlane.Visibility -ne 'Collapsed'){
+        if($hoverNW.Visibility -ne 'Visible' -or $hoverLeft.Visibility -ne 'Collapsed'){
             throw 'O hover do canto mostrou o destaque errado.'
         }
         Set-TransformHover 'ROTATE_YAW'
@@ -1759,16 +1759,13 @@ function Invoke-TransformGizmoSelfTest {
         }
         Set-TransformHover 'MOVE_Z'
         if($centerAxisZ.StrokeThickness -lt 4.5){throw 'Manipulador central: seta Z não recebeu o hover.'}
-        if($transformHoverPlane.Margin.Left -lt 30 -or $transformHoverPlane.Margin.Top -lt 25){
-            throw 'Plano central não foi reduzido em relação à moldura.'
-        }
         Save-TransformGizmoPreview 'centro'
-        if($transformHoverPlane.Visibility -ne 'Visible' -or $hoverTop.Visibility -ne 'Collapsed'){
-            throw 'O plano central não foi isolado das bordas.'
+        if($hoverTop.Visibility -ne 'Collapsed' -or $hoverLeft.Visibility -ne 'Collapsed'){
+            throw 'O hover central não isolou os destaques das bordas.'
         }
         Set-TransformHover ''
         Save-TransformGizmoPreview 'inativo'
-        if($transformHoverPlane.Visibility -ne 'Collapsed' -or $hoverNW.Visibility -ne 'Collapsed' -or $hoverLeft.Visibility -ne 'Collapsed'){
+        if($hoverNW.Visibility -ne 'Collapsed' -or $hoverLeft.Visibility -ne 'Collapsed'){
             throw 'O gizmo continuou visível sem hover.'
         }
         Write-Host 'MT_PACK_ORGANIZER_GIZMO_SELFTEST_OK'
@@ -3478,7 +3475,6 @@ $xamlText = @'
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
                 <Border BorderBrush="#8E8A93" BorderThickness="0.85" Opacity="0.78" IsHitTestVisible="False"/>
                 <!-- Os destaques são desenhados sob demanda: nenhum puxador permanente. -->
-                <Border Name="transformHoverPlane" Background="#32D5A0F5" Visibility="Collapsed" IsHitTestVisible="False" Margin="34,29"/>
                 <Rectangle Name="hoverLeft" Width="16" Fill="#70D5A0F5" HorizontalAlignment="Left" Margin="3,29,0,29" Visibility="Collapsed" IsHitTestVisible="False"/>
                 <Rectangle Name="hoverRight" Width="16" Fill="#70D5A0F5" HorizontalAlignment="Right" Margin="0,29,3,29" Visibility="Collapsed" IsHitTestVisible="False"/>
                 <Rectangle Name="hoverTop" Height="16" Fill="#70D5A0F5" VerticalAlignment="Top" Margin="29,3,29,0" Visibility="Collapsed" IsHitTestVisible="False"/>
@@ -3540,7 +3536,7 @@ try {
 foreach($n in @(
     'btnUpdate','btnHome','btnNewProject','lblHomeProjects','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -3568,7 +3564,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.33'
+$script:AppVersion = '0.9.34'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3797,14 +3793,13 @@ function Get-TransformHoverMode([double]$x,[double]$y,[double]$width,[double]$he
     $edge=[Math]::Min(30.0,[Math]::Min($width,$height)*0.16)
     if($x -le $edge -or $x -ge $width-$edge){return 'ROTATE_YAW'}
     if($y -le $edge -or $y -ge $height-$edge){return 'ROTATE_PITCH'}
-    return 'MOVE_Z'
+    return ''
 }
 
 function Set-TransformHover([string]$mode) {
     if($script:TransformDragMode){$mode=[string]$script:TransformDragMode}
     if($script:TransformHoverMode -eq $mode){return}
     $script:TransformHoverMode=$mode
-    $transformHoverPlane.Visibility=if($mode -eq 'MOVE_Z'){'Visible'}else{'Collapsed'}
     foreach($h in @($hoverNW,$hoverNE,$hoverSW,$hoverSE,$hoverLeft,$hoverRight,$hoverTop,$hoverBottom)){
         $h.Visibility='Collapsed'
     }
@@ -3837,7 +3832,7 @@ function Set-TransformHover([string]$mode) {
             'ROTATE_YAW'{'GIRAR EM TORNO DO EIXO Y • arraste a faixa vertical • Shift = 5°'}
             'ROTATE_PITCH'{'GIRAR EM TORNO DO EIXO X • arraste a faixa horizontal • Shift = 5°'}
             'ROTATE_ROLL'{'GIRAR EM TORNO DO EIXO Z • arraste o canto • Shift = 5°'}
-            'MOVE_Z'{'MOVER NO EIXO Z • arraste o plano • Alt + arrastar = mover livremente'}
+            'MOVE_Z'{'MOVER NO EIXO Z • arraste a seta verde'}
             'MOVE_X'{'MOVER NO EIXO X • arraste a seta vermelha'}
             'MOVE_Y'{'MOVER NO EIXO Y • arraste a seta azul (profundidade)'}
             'MOVE'{'MOVER LIVREMENTE • arraste a seleção'}
@@ -3875,7 +3870,7 @@ foreach($a in @($centerAxisZ,$centerTipZ)){
     $a.Add_MouseEnter({Set-TransformHover 'MOVE_Z'})
     $a.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Z' $e})
 }
-$centerAxisWidget.Add_MouseEnter({if(-not $script:TransformDragMode){Set-TransformHover 'MOVE_Z'}})
+$centerAxisWidget.Add_MouseEnter({if(-not $script:TransformDragMode){Set-TransformHover ''}})
 $centerAxisWidget.Add_MouseMove({
     param($s,$e)
     if($script:TransformDragMode){return}
@@ -3883,10 +3878,12 @@ $centerAxisWidget.Add_MouseMove({
     $mode=if($source -eq $centerAxisX -or $source -eq $centerTipX){'MOVE_X'}
         elseif($source -eq $centerAxisY -or $source -eq $centerTipY){'MOVE_Y'}
         elseif($source -eq $centerRotateRing){'ROTATE_ROLL'}
-        else{'MOVE_Z'}
+        else{''}
     Set-TransformHover $mode
 })
-$centerAxisWidget.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Z' $e})
+$centerAxisWidget.Add_MouseLeftButtonDown({param($s,$e)
+    if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Alt) -ne 0){Start-TransformDrag 'MOVE' $e}
+})
 $centerRotateRing.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
 $centerAxisWidget.Add_MouseLeave({
     if(-not $script:TransformDragMode){
