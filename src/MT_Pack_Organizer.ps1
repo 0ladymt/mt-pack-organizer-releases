@@ -1812,6 +1812,9 @@ function Invoke-TransformGizmoSelfTest {
         $script:Yaw=0;$script:Pitch=0;$script:Roll=0
         $script:ModelOffsetX=0;$script:ModelOffsetY=0;$script:ModelOffsetZ=0
         Update-ModelTransform
+        # O teste deve calibrar a caixa para a câmera sintética, sem herdar
+        # dimensões da peça que o fixture acabou de abrir.
+        Set-TransformBox $false
         Set-TransformBox $true
         $width=[double]$transformBox.Width;$height=[double]$transformBox.Height
         if($width -lt 30 -or $height -lt 30){throw 'Caixa de seleção 3D não foi projetada.'}
