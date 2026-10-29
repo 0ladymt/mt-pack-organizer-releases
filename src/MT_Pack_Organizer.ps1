@@ -1168,25 +1168,41 @@ function Rename-RecentProject([string]$path) {
 function Refresh-RecentProjects {
     if($null -eq $lstRecentProjects){return}
     $lstRecentProjects.Items.Clear()
+    $homeKeep=0;$homeDelete=0;$homeTotal=0;$homeReviewed=0
     foreach($path in @(Get-RecentProjectPaths)) {
         $summary=Get-SavedProjectInfo $path
+        $homeKeep += [int]$summary.Keep
+        $homeDelete += [int]$summary.Delete
+        $homeTotal += [int]$summary.Total
+        $homeReviewed += ([int]$summary.Keep+[int]$summary.Delete)
         $item=New-Object Windows.Controls.ListBoxItem
         $item.Tag=[string]$path
         $panel=New-Object Windows.Controls.Grid
-        $panel.Margin='12,10'
+        $panel.Margin='15,12'
         $panel.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
         $rightCol=New-Object Windows.Controls.ColumnDefinition;$rightCol.Width='Auto';$panel.ColumnDefinitions.Add($rightCol)
         $left=New-Object Windows.Controls.StackPanel
+        $heading=New-Object Windows.Controls.StackPanel;$heading.Orientation='Horizontal'
         $name=New-Object Windows.Controls.TextBlock
         $name.Text=[string]$summary.Name
-        $name.FontWeight='Bold';$name.FontSize=17
-        [void]$left.Children.Add($name)
+        $name.FontWeight='Bold';$name.FontSize=17;$name.VerticalAlignment='Center'
+        [void]$heading.Children.Add($name)
+        $status=New-Object Windows.Controls.Border
+        $status.Background=New-SolidBrush $(if([int]$summary.Percent -ge 100){'#193327'}else{'#2C1E37'})
+        $status.BorderBrush=New-SolidBrush $(if([int]$summary.Percent -ge 100){'#43745B'}else{'#68427E'})
+        $status.BorderThickness='1';$status.CornerRadius='7';$status.Padding='8,4';$status.Margin='12,0,0,0'
+        $statusLabel=New-Object Windows.Controls.TextBlock
+        $statusLabel.Text=if([int]$summary.Percent -ge 100){'CONCLUÍDO'}else{'EM ANDAMENTO'}
+        $statusLabel.FontSize=9;$statusLabel.FontWeight='Bold'
+        $statusLabel.Foreground=New-SolidBrush $(if([int]$summary.Percent -ge 100){'#9EE3B8'}else{'#D8B5F0'})
+        $status.Child=$statusLabel;[void]$heading.Children.Add($status)
+        [void]$left.Children.Add($heading)
         $details=New-Object Windows.Controls.TextBlock
-        $details.Margin='0,9,0,10';$details.FontSize=12;$details.Foreground=New-SolidBrush '#C6B6CC'
+        $details.Margin='0,12,0,12';$details.FontSize=11;$details.Foreground=New-SolidBrush '#B5A9BD'
         $details.Text="MANTER  $($summary.Keep)    •    EXCLUIR  $($summary.Delete)    •    $($summary.Percent)% CONCLUÍDO    •    PEÇA $([int]$summary.Index+1)/$($summary.Total)"
         [void]$left.Children.Add($details)
         $bar=New-Object Windows.Controls.ProgressBar
-        $bar.Height=6;$bar.Maximum=100;$bar.Value=[double]$summary.Percent
+        $bar.Height=5;$bar.Maximum=100;$bar.Value=[double]$summary.Percent
         $bar.Foreground=New-SolidBrush '#A432DC';$bar.Background=New-SolidBrush '#302637'
         $bar.MinWidth=320;$bar.HorizontalAlignment='Stretch'
         [void]$left.Children.Add($bar)
@@ -1195,9 +1211,10 @@ function Refresh-RecentProjects {
         $pathText.Margin='0,10,0,0';$pathText.TextTrimming='CharacterEllipsis';[void]$left.Children.Add($pathText)
         [Windows.Controls.Grid]::SetColumn($left,0);[void]$panel.Children.Add($left)
         $actions=New-Object Windows.Controls.StackPanel;$actions.Orientation='Vertical';$actions.Margin='24,0,0,0'
-        $open=New-Object Windows.Controls.Button;$open.Content='CONTINUAR  ›';$open.Width=125;$open.Height=36;$open.Padding='2'
-        $rename=New-Object Windows.Controls.Button;$rename.Content='RENOMEAR';$rename.Width=125;$rename.Height=34;$rename.Padding='2';$rename.Margin='0,7,0,0'
-        $remove=New-Object Windows.Controls.Button;$remove.Content='EXCLUIR PROJETO';$remove.Width=125;$remove.Height=34;$remove.Padding='2';$remove.Margin='0,7,0,0'
+        $open=New-Object Windows.Controls.Button;$open.Content='CONTINUAR  ›';$open.Width=136;$open.Height=39;$open.Padding='2'
+        $open.Background=New-SolidBrush '#8837B8';$open.BorderBrush=New-SolidBrush '#A65DCC';$open.FontWeight='Bold'
+        $rename=New-Object Windows.Controls.Button;$rename.Content='RENOMEAR';$rename.Width=136;$rename.Height=34;$rename.Padding='2';$rename.Margin='0,8,0,0'
+        $remove=New-Object Windows.Controls.Button;$remove.Content='EXCLUIR PROJETO';$remove.Width=136;$remove.Height=34;$remove.Padding='2';$remove.Margin='0,8,0,0'
         $remove.Foreground=New-SolidBrush '#FF9CA4'
         $localPath=[string]$path
         $open.Add_Click({Invoke-Safe {Open-PackPath $localPath}}.GetNewClosure())
@@ -1210,6 +1227,9 @@ function Refresh-RecentProjects {
     }
     $lblNoProjects.Visibility=if($lstRecentProjects.Items.Count -eq 0){'Visible'}else{'Collapsed'}
     if($lblHomeProjects){$lblHomeProjects.Text=[string]$lstRecentProjects.Items.Count}
+    if($lblHomeKeep){$lblHomeKeep.Text=[string]$homeKeep}
+    if($lblHomeDelete){$lblHomeDelete.Text=[string]$homeDelete}
+    if($lblHomeReviewed){$lblHomeReviewed.Text="${homeReviewed} / ${homeTotal}"}
 }
 
 function Go-Home {
@@ -1329,6 +1349,8 @@ function Ensure-RuntimeCollections {
     if($null -eq $script:HideHairSelections -or -not ($script:HideHairSelections -is [hashtable])){$script:HideHairSelections=@{}}
     if($null -eq $script:VariantIndex -or -not ($script:VariantIndex -is [hashtable])){$script:VariantIndex=@{}}
     if($null -eq $script:TextureCache -or -not ($script:TextureCache -is [hashtable])){$script:TextureCache=@{}}
+    if($null -eq $script:TextureCacheCost -or -not ($script:TextureCacheCost -is [hashtable])){$script:TextureCacheCost=@{}}
+    if($null -eq $script:TextureCacheBytes){$script:TextureCacheBytes=[long]0}
     if($null -eq $script:TextureInfoCache -or -not ($script:TextureInfoCache -is [hashtable])){$script:TextureInfoCache=@{}}
     if($null -eq $script:MeshCache -or -not ($script:MeshCache -is [hashtable])){$script:MeshCache=@{}}
     if($null -eq $script:MaterialBitmapCache -or -not ($script:MaterialBitmapCache -is [hashtable])){$script:MaterialBitmapCache=@{}}
@@ -1825,7 +1847,8 @@ function Get-MeshCached([IO.FileInfo]$ydd) {
     if($null -eq $parsed){throw "O parser 3D não retornou dados para $($ydd.Name)."}
     $script:MeshCache[$key]=$parsed
     $script:MeshCacheOrder=@($script:MeshCacheOrder) + $key
-    while(@($script:MeshCacheOrder).Count -gt 48){
+    # Malhas são pesadas: manter só uma pequena janela de navegação em memória.
+    while(@($script:MeshCacheOrder).Count -gt 12){
         $old=[string]$script:MeshCacheOrder[0]
         $script:MeshCacheOrder=@($script:MeshCacheOrder | Select-Object -Skip 1)
         if(-not [string]::IsNullOrWhiteSpace($old)){$script:MeshCache.Remove($old)}
@@ -1913,6 +1936,10 @@ function Get-TextureInfosCached([IO.FileInfo]$file) {
     if ($script:TextureInfoCache.ContainsKey($key)) { return $script:TextureInfoCache[$key] }
     $arr = @([MtRageParser]::LoadTextureInfos($file.FullName))
     $script:TextureInfoCache[$key] = $arr
+    if($script:TextureInfoCache.Count -gt 256){
+        $oldest=@($script:TextureInfoCache.Keys | Select-Object -First 64)
+        foreach($old in $oldest){if($old -ne $key){$script:TextureInfoCache.Remove($old)}}
+    }
     return $arr
 }
 
@@ -1967,11 +1994,25 @@ function Get-TexturesCached([IO.FileInfo]$file) {
     }
     $arr = @([MtRageParser]::LoadTextures([string]$file.FullName))
     $script:TextureCache[$key] = $arr
+    $cost=[long]0
+    foreach($t in $arr){$cost += ([long]$t.Width)*([long]$t.Height)*4L}
+    $script:TextureCacheCost[$key]=$cost
+    $script:TextureCacheBytes=[long]$script:TextureCacheBytes+$cost
     $script:TextureCacheOrder=@($script:TextureCacheOrder) + $key
-    while(@($script:TextureCacheOrder).Count -gt 28) {
+    # 192 MB de texturas decodificadas por padrão, sem descartar a textura atual.
+    # Evita que centenas de variações de packs grandes esgotem a RAM.
+    $limit=[long](192*1024*1024)
+    while(@($script:TextureCacheOrder).Count -gt 1 -and
+        (@($script:TextureCacheOrder).Count -gt 12 -or [long]$script:TextureCacheBytes -gt $limit)) {
         $oldKey=[string]$script:TextureCacheOrder[0]
         $script:TextureCacheOrder=@($script:TextureCacheOrder | Select-Object -Skip 1)
-        if(-not [string]::IsNullOrWhiteSpace($oldKey)){$script:TextureCache.Remove($oldKey)}
+        if(-not [string]::IsNullOrWhiteSpace($oldKey)){
+            $script:TextureCache.Remove($oldKey)
+            if($script:TextureCacheCost.ContainsKey($oldKey)){
+                $script:TextureCacheBytes=[Math]::Max([long]0,[long]$script:TextureCacheBytes-[long]$script:TextureCacheCost[$oldKey])
+                $script:TextureCacheCost.Remove($oldKey)
+            }
+        }
     }
     return $arr
 }
@@ -2040,8 +2081,8 @@ function Start-ThumbnailQueue {
     if($script:ThumbQueue.Count -eq 0){ return }
 
     # DispatcherTimer sem closure local: sempre trabalha na fila atual.
-    $timer=New-Object Windows.Threading.DispatcherTimer
-    $timer.Interval=[TimeSpan]::FromMilliseconds(160)
+    $timer=[Windows.Threading.DispatcherTimer]::new([Windows.Threading.DispatcherPriority]::Background)
+    $timer.Interval=[TimeSpan]::FromMilliseconds(240)
     $timer.Add_Tick({
         if($script:ThumbQueueIndex -ge @($script:ThumbQueue).Count){
             try{$script:ThumbTimer.Stop()}catch{}
@@ -2612,6 +2653,8 @@ function Open-PackPath([string]$selectedPath) {
         $script:ModelScale = 1.0
         $script:ModelOffsetX = 0.0; $script:ModelOffsetY = 0.0; $script:ModelOffsetZ = 0.0
         $script:TextureCache=@{}
+        $script:TextureCacheCost=@{}
+        $script:TextureCacheBytes=[long]0
         $script:TextureInfoCache=@{}
         $script:TextureCacheOrder=@()
         $script:MeshCache=@{}
@@ -3349,10 +3392,10 @@ $xamlText = @'
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="MT Studio • Pack Organizer"
         Width="1480" Height="900" MinWidth="1220" MinHeight="740"
-        WindowStartupLocation="CenterScreen" Background="#000000" Foreground="#FFFFFF" WindowStyle="None" ResizeMode="CanResize">
+        WindowStartupLocation="CenterScreen" Background="#09090D" Foreground="#FFFFFF" WindowStyle="None" ResizeMode="CanResize">
 <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/></shell:WindowChrome.WindowChrome>
 <Window.Resources>
-    <SolidColorBrush x:Key="Neon" Color="#A320FF"/><SolidColorBrush x:Key="Lilac" Color="#D88BFF"/>
+    <SolidColorBrush x:Key="Neon" Color="#A432DC"/><SolidColorBrush x:Key="Lilac" Color="#D9A4F1"/>
     <SolidColorBrush x:Key="Graphite" Color="#1F1F24"/><SolidColorBrush x:Key="Panel" Color="#111114"/>
     <SolidColorBrush x:Key="Line" Color="#2D2931"/><SolidColorBrush x:Key="Muted" Color="#8E8992"/>
     <Style TargetType="TextBlock"><Setter Property="FontFamily" Value="Montserrat,Segoe UI"/></Style>
@@ -3360,12 +3403,12 @@ $xamlText = @'
         <Setter Property="Background" Value="#1F1F24"/><Setter Property="Foreground" Value="#FFFFFF"/>
         <Setter Property="BorderBrush" Value="#37323D"/><Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding" Value="15,10"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Name="b" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="BorderBrush" Value="#A320FF"/><Setter TargetName="b" Property="Background" Value="#28212E"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.82"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Opacity" Value="0.35"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Name="b" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="BorderBrush" Value="#795189"/><Setter TargetName="b" Property="Background" Value="#302637"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.82"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Opacity" Value="0.35"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="Button" BasedOn="{StaticResource BaseButton}"/>
-    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource BaseButton}"><Setter Property="Background" Value="#A320FF"/><Setter Property="BorderBrush" Value="#D88BFF"/><Setter Property="FontSize" Value="14"/></Style>
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource BaseButton}"><Setter Property="Background" Value="#A432DC"/><Setter Property="BorderBrush" Value="#BC79E5"/><Setter Property="FontSize" Value="14"/></Style>
     <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource BaseButton}"><Setter Property="Background" Value="#211619"/><Setter Property="BorderBrush" Value="#8E3D4A"/><Setter Property="Foreground" Value="#FFB5BE"/><Setter Property="FontSize" Value="14"/></Style>
-    <Style TargetType="TextBox"><Setter Property="Background" Value="#0D0D10"/><Setter Property="Foreground" Value="#FFFFFF"/><Setter Property="BorderBrush" Value="#37323D"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="10,8"/></Style>
+    <Style TargetType="TextBox"><Setter Property="Background" Value="#0D0D10"/><Setter Property="Foreground" Value="#FFFFFF"/><Setter Property="BorderBrush" Value="#37323D"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="10,8"/><Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="#A432DC"/></Trigger></Style.Triggers></Style>
     <Style TargetType="ComboBoxItem">
         <Setter Property="Foreground" Value="#ECE9F0"/><Setter Property="Background" Value="#121216"/>
         <Setter Property="Padding" Value="10,8"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -3408,15 +3451,15 @@ $xamlText = @'
     </Style>
     <Style TargetType="CheckBox"><Setter Property="Foreground" Value="#D8D4DC"/><Setter Property="FontSize" Value="9.5"/><Setter Property="Cursor" Value="Hand"/></Style>
     <Style TargetType="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/></Style>
-    <Style TargetType="ListBoxItem"><Setter Property="Foreground" Value="#FFFFFF"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="7"/><Setter Property="Margin" Value="0,0,0,7"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border Name="ib" Background="{TemplateBinding Background}" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="9" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="ib" Property="BorderBrush" Value="#A320FF"/><Setter TargetName="ib" Property="Background" Value="#1C1024"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ib" Property="BorderBrush" Value="#75498C"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+    <Style TargetType="ListBoxItem"><Setter Property="Foreground" Value="#FFFFFF"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="7"/><Setter Property="Margin" Value="0,0,0,8"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border Name="ib" Background="#17151B" BorderBrush="#302A36" BorderThickness="1" CornerRadius="11" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="ib" Property="BorderBrush" Value="#8150A0"/><Setter TargetName="ib" Property="Background" Value="#21182A"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ib" Property="BorderBrush" Value="#624675"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
     <Style TargetType="ScrollBar">
         <Setter Property="Width" Value="9"/><Setter Property="Background" Value="Transparent"/>
         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar"><Grid Width="9" Background="#0B0B0E"><Track Name="PART_Track" IsDirectionReversed="True" Orientation="{TemplateBinding Orientation}" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}" ViewportSize="{TemplateBinding ViewportSize}"><Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0"/></Track.DecreaseRepeatButton><Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#6E347E" CornerRadius="4" Margin="2,1"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0"/></Track.IncreaseRepeatButton></Track></Grid></ControlTemplate></Setter.Value></Setter>
     </Style>
 </Window.Resources>
-<Grid Background="#000000">
+<Grid Background="#09090D">
     <Grid.RowDefinitions><RowDefinition Height="5"/><RowDefinition Height="92"/><RowDefinition Height="*"/><RowDefinition Height="30"/></Grid.RowDefinitions>
-    <Rectangle Grid.Row="0" Fill="#A320FF"/>
+    <Rectangle Grid.Row="0" Fill="#A432DC"/>
 
     <Border Name="topHeader" Grid.Row="1" Background="#080809" BorderBrush="#19171D" BorderThickness="0,0,0,1">
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -3427,24 +3470,28 @@ $xamlText = @'
         </Grid>
     </Border>
 
-    <Grid Grid.Row="2" Name="emptyState" Margin="28,18">
-        <Border MaxWidth="1120" Background="#0D0D11" BorderBrush="#302439" BorderThickness="1" CornerRadius="18" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="28">
-            <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <Grid Grid.Row="2" Name="emptyState" Margin="28,22">
+        <Border MaxWidth="1160" Background="#101014" BorderBrush="#312B38" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Stretch" VerticalAlignment="Top" Padding="28">
+            <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                    <StackPanel><TextBlock Text="SEUS PROJETOS" FontSize="29" FontWeight="Bold"/><TextBlock Text="Organize seus packs e continue exatamente de onde parou." Foreground="#A19AA8" FontSize="13" Margin="0,8,0,0"/></StackPanel>
-                    <Button Name="btnNewProject" Grid.Column="1" Content="+  NOVO PROJETO" Height="45" Width="180" Background="#A432DC" BorderBrush="#C070F0" FontWeight="Bold"/>
+                    <StackPanel><TextBlock Text="ESPAÇO DE TRABALHO" Foreground="#BE8BD8" FontSize="10" FontWeight="Bold"/><TextBlock Text="Seus projetos" FontSize="29" FontWeight="Bold" Margin="0,5,0,0"/><TextBlock Text="Todos os packs em um só lugar, com suas decisões e progresso preservados." Foreground="#AAA1B0" FontSize="12" Margin="0,8,0,0"/></StackPanel>
+                    <Button Name="btnNewProject" Grid.Column="1" Content="+  NOVO PROJETO" Style="{StaticResource PrimaryButton}" Height="46" Width="182" FontSize="12" FontWeight="Bold" VerticalAlignment="Center"/>
                 </Grid>
-                <Border Grid.Row="1" Background="#17121B" BorderBrush="#392742" BorderThickness="1" CornerRadius="10" Margin="0,22,0,16" Padding="16,11">
-                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <Border Background="#342039" CornerRadius="7" Padding="11,7" Margin="0,0,12,0"><StackPanel Orientation="Horizontal"><TextBlock Name="lblHomeProjects" Text="0" FontSize="19" FontWeight="Bold" Foreground="#E6B0FF" VerticalAlignment="Center"/><TextBlock Text="  PROJETOS" FontSize="10" FontWeight="Bold" Foreground="#CFA4E3" VerticalAlignment="Center"/></StackPanel></Border>
-                        <Rectangle Grid.Column="1" Width="1" Height="27" Fill="#46374D" Margin="0,0,15,0" VerticalAlignment="Center"/>
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="●" Foreground="#A432DC" FontSize="11" Margin="0,0,9,0"/><TextBlock Text="Progresso salvo automaticamente" Foreground="#C6BACB" FontSize="12" FontWeight="SemiBold"/></StackPanel>
+                <Border Grid.Row="1" Background="#18151E" BorderBrush="#342B3A" BorderThickness="1" CornerRadius="11" Margin="0,23,0,19" Padding="20,16">
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="PROJETOS SALVOS" Foreground="#A49AAB" FontSize="10" FontWeight="SemiBold"/><TextBlock Name="lblHomeProjects" Text="0" FontSize="23" FontWeight="Bold" Foreground="#F1DEFA" Margin="0,5,0,0"/></StackPanel>
+                        <Rectangle Grid.Column="1" Width="1" Fill="#39303E" Margin="0,3,0,3"/>
+                        <StackPanel Grid.Column="2" Margin="20,0,0,0"><TextBlock Text="PEÇAS MARCADAS" Foreground="#A49AAB" FontSize="10" FontWeight="SemiBold"/><TextBlock Name="lblHomeReviewed" Text="0 / 0" FontSize="23" FontWeight="Bold" Foreground="#F1DEFA" Margin="0,5,0,0"/></StackPanel>
+                        <Rectangle Grid.Column="3" Width="1" Fill="#39303E" Margin="0,3,0,3"/>
+                        <StackPanel Grid.Column="4" Margin="20,0,0,0"><TextBlock Text="MANTER" Foreground="#A49AAB" FontSize="10" FontWeight="SemiBold"/><TextBlock Name="lblHomeKeep" Text="0" FontSize="23" FontWeight="Bold" Foreground="#B9A0F0" Margin="0,5,0,0"/></StackPanel>
+                        <Rectangle Grid.Column="5" Width="1" Fill="#39303E" Margin="0,3,0,3"/>
+                        <StackPanel Grid.Column="6" Margin="20,0,0,0"><TextBlock Text="EXCLUIR" Foreground="#A49AAB" FontSize="10" FontWeight="SemiBold"/><TextBlock Name="lblHomeDelete" Text="0" FontSize="23" FontWeight="Bold" Foreground="#F2A2AF" Margin="0,5,0,0"/></StackPanel>
                     </Grid>
                 </Border>
-                <Border Grid.Row="2" Background="#111115" CornerRadius="12" BorderBrush="#2E2933" BorderThickness="1" Padding="17">
-                    <DockPanel><TextBlock DockPanel.Dock="Top" Text="PROJETOS RECENTES" FontSize="13" FontWeight="Bold" Foreground="#D88BFF" Margin="0,0,0,14"/>
-                    <TextBlock Name="lblNoProjects" DockPanel.Dock="Top" Text="Nenhum projeto por enquanto. Clique em NOVO PROJETO para começar." Foreground="#A59AA8" FontSize="13" Margin="0,15,0,0" Visibility="Collapsed"/>
-                    <ListBox Name="lstRecentProjects" Background="Transparent" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto" ToolTip="Use CONTINUAR para retomar um projeto"/></DockPanel>
+                <Border Grid.Row="2" Background="#131218" CornerRadius="12" BorderBrush="#302A36" BorderThickness="1" Padding="18">
+                    <DockPanel><Grid DockPanel.Dock="Top" Margin="0,0,0,14"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="RETOMAR PROJETOS" FontSize="12" FontWeight="Bold" Foreground="#E4C0F6"/><TextBlock Grid.Column="1" Text="Continue da última peça visualizada" Foreground="#918799" FontSize="10"/></Grid>
+                    <TextBlock Name="lblNoProjects" DockPanel.Dock="Top" Text="Você ainda não tem projetos. Crie seu primeiro pack para começar." Foreground="#A59AA8" FontSize="12" Margin="0,15,0,0" Visibility="Collapsed"/>
+                    <ListBox Name="lstRecentProjects" MinHeight="190" MaxHeight="490" Background="Transparent" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto" ToolTip="Use CONTINUAR para retomar um projeto"/></DockPanel>
                 </Border>
                 <Image Name="imgEmptyLogo" Visibility="Collapsed"/>
             </Grid>
@@ -3453,20 +3500,20 @@ $xamlText = @'
 
     <Grid Grid.Row="2" Name="mainContent" Visibility="Collapsed" Margin="18,8,18,14">
         <Grid.ColumnDefinitions><ColumnDefinition Width="342"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
-        <Border Grid.Column="0" Background="#101014" CornerRadius="14" BorderBrush="#29252F" BorderThickness="1" Padding="15"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="PEÇA" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Visibility="Collapsed"/><TextBlock Name="lblMesh" Foreground="#77717D" FontSize="9" Margin="0,5,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C174F0" FontSize="8.5" FontWeight="SemiBold" Margin="0,7,0,0"/><StackPanel Orientation="Horizontal" Margin="0,7,0,0"><Button Name="btnPropYaw" Content="GIRAR ACESSÓRIO ↻" Visibility="Collapsed" Height="28" FontSize="9" Margin="0,0,6,0" ToolTip="Gira o acessório 90 graus sem alterar o arquivo"/><Button Name="btnPropPitch" Content="COLOCAR EM PÉ" Visibility="Collapsed" Height="28" FontSize="9" ToolTip="Alterna a inclinação do acessório"/></StackPanel></StackPanel>
+        <Border Grid.Column="0" Background="#151319" CornerRadius="14" BorderBrush="#342C3A" BorderThickness="1" Padding="17"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <StackPanel><TextBlock Text="PEÇA ATUAL" Foreground="#D6A1EE" FontSize="11" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,4,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" FontSize="12" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Visibility="Collapsed"/><TextBlock Name="lblMesh" Foreground="#A49AA9" FontSize="10" Margin="0,6,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C994E4" FontSize="10" FontWeight="SemiBold" Margin="0,7,0,0"/><StackPanel Orientation="Horizontal" Margin="0,7,0,0"><Button Name="btnPropYaw" Content="GIRAR ACESSÓRIO ↻" Visibility="Collapsed" Height="28" FontSize="9" Margin="0,0,6,0" ToolTip="Gira o acessório 90 graus sem alterar o arquivo"/><Button Name="btnPropPitch" Content="COLOCAR EM PÉ" Visibility="Collapsed" Height="28" FontSize="9" ToolTip="Alterna a inclinação do acessório"/></StackPanel></StackPanel>
             <StackPanel Grid.Row="1" Margin="0,14,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnPrev" Content="‹  ANTERIOR" Height="39" Margin="0,0,5,0"/><Button Name="btnNext" Grid.Column="1" Content="PRÓXIMA  ›" Height="39" Margin="5,0,0,0"/></Grid><Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnFirst" Content="INÍCIO" Height="34" FontSize="11" FontWeight="Bold" Margin="0,0,5,0"/><Button Name="btnLast" Grid.Column="1" Content="FIM" Height="34" FontSize="11" FontWeight="Bold" Margin="5,0,0,0"/></Grid></StackPanel>
             <Border Grid.Row="2" Background="#0C0C10" BorderBrush="#29252F" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,11,0,0">
                 <StackPanel>
-                    <TextBlock Text="FILTRAR POR CATEGORIA" Foreground="#D88BFF" FontSize="9" FontWeight="Bold"/>
+                    <TextBlock Text="FILTRAR POR CATEGORIA" Foreground="#D6A1EE" FontSize="10" FontWeight="Bold"/>
                     <ComboBox Name="cmbCategory" Height="34" Margin="0,6,0,0" DisplayMemberPath="Display" SelectedValuePath="Key"/>
                     <CheckBox Name="chkHideHair" Content="ESCONDER CABELO" Margin="2,9,0,0" Visibility="Collapsed"/>
                 </StackPanel>
             </Border>
             <Separator Grid.Row="3" Margin="0,12,0,10" Background="#2D2931"/>
-            <Grid Grid.Row="4"><TextBlock Text="TEXTURAS" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblTextureCount" Text="0 TEXTURAS" Foreground="#68646D" FontSize="9" HorizontalAlignment="Right"/></Grid>
-            <TextBlock Grid.Row="5" Text="Miniatura • formato • resolução" Foreground="#68646D" FontSize="9" Margin="0,5,0,8"/>
-            <Grid Grid.Row="6"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ListBox Name="lstTextures"/><TextBlock Name="lblTextureInfo" Grid.Row="1" Foreground="#8E8992" FontSize="9" TextWrapping="Wrap" Margin="0,7,0,0"/><Button Name="btnDeleteTexture" Grid.Row="2" Content="EXCLUIR TEXTURA SELECIONADA" Height="40" Margin="0,10,0,12" Background="#211619" BorderBrush="#8E3D4A" Foreground="#FFB5BE"/></Grid>
+            <Grid Grid.Row="4"><TextBlock Text="TEXTURAS" Foreground="#D6A1EE" FontSize="11" FontWeight="Bold"/><TextBlock Name="lblTextureCount" Text="0 TEXTURAS" Foreground="#A399AB" FontSize="10" HorizontalAlignment="Right"/></Grid>
+            <TextBlock Grid.Row="5" Text="Miniatura • formato • resolução" Foreground="#958A9E" FontSize="10" Margin="0,6,0,9"/>
+            <Grid Grid.Row="6"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ListBox Name="lstTextures"/><TextBlock Name="lblTextureInfo" Grid.Row="1" Foreground="#A49AA9" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/><Button Name="btnDeleteTexture" Grid.Row="2" Content="EXCLUIR TEXTURA SELECIONADA" Height="40" Margin="0,10,0,12" Background="#211619" BorderBrush="#8E3D4A" Foreground="#FFB5BE"/></Grid>
         </Grid></Border>
 
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
@@ -3498,12 +3545,12 @@ $xamlText = @'
             <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Name="lblTransformHint" Text="Selecione a peça • aproxime o mouse de uma borda ou canto • Ctrl + rolagem = escala" Foreground="#A5A1AA" FontSize="9"/></Border>
         </Grid></Border>
 
-        <Border Grid.Column="4" Background="#111114" CornerRadius="13" BorderBrush="#2D2931" BorderThickness="1" Padding="15"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
-            <TextBlock Text="DECISÃO" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><StackPanel Orientation="Horizontal" Margin="0,7,0,12"><Ellipse Name="decisionDot" Width="7" Height="7" Fill="#66666D" Margin="0,0,8,0"/><TextBlock Name="lblDecision" Text="PENDENTE" FontSize="13" FontWeight="Bold"/></StackPanel>
+        <Border Grid.Column="4" Background="#151319" CornerRadius="13" BorderBrush="#342C3A" BorderThickness="1" Padding="17"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+            <TextBlock Text="DECISÃO" Foreground="#D6A1EE" FontSize="11" FontWeight="Bold"/><StackPanel Orientation="Horizontal" Margin="0,8,0,14"><Ellipse Name="decisionDot" Width="8" Height="8" Fill="#66666D" Margin="0,0,8,0"/><TextBlock Name="lblDecision" Text="PENDENTE" FontSize="14" FontWeight="Bold"/></StackPanel>
             <Button Name="btnKeep" Content="1   MANTER" Style="{StaticResource PrimaryButton}" Height="50" Margin="0,0,0,8"/><Button Name="btnDelete" Content="2   EXCLUIR" Style="{StaticResource DangerButton}" Height="50"/><Button Name="btnUndo" Content="↶   DESFAZER ÚLTIMA" Height="38" Margin="0,8,0,0"/>
-            <Separator Margin="0,14,0,12" Background="#2D2931"/><TextBlock Text="PROGRESSO" Foreground="#D88BFF" FontSize="10" FontWeight="Bold"/><TextBlock Name="lblDone" Text="0 / 0" FontSize="18" FontWeight="Bold" Margin="0,5,0,5"/><ProgressBar Name="progress" Height="4" Minimum="0" Maximum="100" Foreground="#A320FF" Background="#242429"/><Grid Margin="0,11,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Border Background="#1C1024" CornerRadius="8" Padding="8" Margin="0,0,4,0"><StackPanel><TextBlock Name="lblKeepCount" Text="0" FontSize="17" FontWeight="Bold" Foreground="#D88BFF"/><TextBlock Text="MANTER" Foreground="#68646D" FontSize="8"/></StackPanel></Border><Border Grid.Column="1" Background="#211619" CornerRadius="8" Padding="8" Margin="4,0,0,0"><StackPanel><TextBlock Name="lblDeleteCount" Text="0" FontSize="17" FontWeight="Bold" Foreground="#FF8B9A"/><TextBlock Text="EXCLUIR" Foreground="#68646D" FontSize="8"/></StackPanel></Border></Grid>
-            <Separator Margin="0,14,0,12" Background="#2D2931"/><Button Name="btnApply" Content="APLICAR EXCLUSÕES" Height="40"/><TextBlock Text="Move os arquivos para _PARA_EXCLUIR. Nada é apagado definitivamente." Foreground="#68646D" FontSize="8.5" TextWrapping="Wrap" Margin="0,6,0,0"/>
-            <Border Margin="0,15,0,0" Background="#0B0B0E" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="10" Padding="11"><StackPanel><TextBlock Text="GERAR ADD-ON FIVEM" FontWeight="Bold" FontSize="11"/><TextBlock Text="1 resource • até 150 peças por categoria em cada DLC • r → whi • u → uni." Foreground="#8E8992" FontSize="8.5" TextWrapping="Wrap" Margin="0,6,0,9"/><TextBlock Text="NOME DO ADD-ON" Foreground="#D88BFF" FontSize="8.5" FontWeight="Bold"/><TextBox Name="txtAddonName" Text="mtstudio_pack" Margin="0,4,0,8"/><Button Name="btnBuildAddon" Content="GERAR ADD-ON" Style="{StaticResource PrimaryButton}" Height="42"/><TextBlock Name="lblBuildStatus" Text="Pronto para gerar" Foreground="#68646D" FontSize="8.5" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel></Border>
+            <Separator Margin="0,14,0,12" Background="#39303E"/><TextBlock Text="PROGRESSO" Foreground="#D6A1EE" FontSize="11" FontWeight="Bold"/><TextBlock Name="lblDone" Text="0 / 0" FontSize="19" FontWeight="Bold" Margin="0,6,0,7"/><ProgressBar Name="progress" Height="5" Minimum="0" Maximum="100" Foreground="#A432DC" Background="#29232F"/><Grid Margin="0,11,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Border Background="#241A2E" CornerRadius="9" Padding="10" Margin="0,0,4,0"><StackPanel><TextBlock Name="lblKeepCount" Text="0" FontSize="19" FontWeight="Bold" Foreground="#D6A1EE"/><TextBlock Text="MANTER" Foreground="#B0A3B9" FontSize="10"/></StackPanel></Border><Border Grid.Column="1" Background="#291C23" CornerRadius="9" Padding="10" Margin="4,0,0,0"><StackPanel><TextBlock Name="lblDeleteCount" Text="0" FontSize="19" FontWeight="Bold" Foreground="#FF9AAA"/><TextBlock Text="EXCLUIR" Foreground="#B0A3B9" FontSize="10"/></StackPanel></Border></Grid>
+            <Separator Margin="0,14,0,12" Background="#39303E"/><Button Name="btnApply" Content="APLICAR EXCLUSÕES" Height="40"/><TextBlock Text="Move os arquivos para _PARA_EXCLUIR. Nada é apagado definitivamente." Foreground="#A49AA9" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
+            <Border Margin="0,16,0,0" Background="#1C1722" BorderBrush="#493450" BorderThickness="1" CornerRadius="11" Padding="13"><StackPanel><TextBlock Text="GERAR ADD-ON FIVEM" FontWeight="Bold" FontSize="11"/><TextBlock Text="1 resource • até 150 peças por categoria em cada DLC • r → whi • u → uni." Foreground="#A49AA9" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,12"/><TextBlock Text="NOME DO ADD-ON" Foreground="#D6A1EE" FontSize="10" FontWeight="Bold"/><TextBox Name="txtAddonName" Text="mtstudio_pack" Margin="0,6,0,10"/><Button Name="btnBuildAddon" Content="GERAR ADD-ON" Style="{StaticResource PrimaryButton}" Height="42"/><TextBlock Name="lblBuildStatus" Text="Pronto para gerar" Foreground="#A49AA9" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/></StackPanel></Border>
         </StackPanel></ScrollViewer></Border>
     </Grid>
 
@@ -3511,7 +3558,7 @@ $xamlText = @'
 
     <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#E6000000" Panel.ZIndex="99"><Border Width="390" Padding="26" Background="#111114" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="14" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel><Image Name="imgLoadingLogo" Width="175" Height="78" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,16,0,10"/><ProgressBar Height="5" IsIndeterminate="True" Foreground="#A320FF" Background="#242429"/><TextBlock Text="O visualizador abre assim que o índice local estiver pronto." Foreground="#8E8992" FontSize="9" HorizontalAlignment="Center" Margin="0,9,0,0"/></StackPanel></Border></Border>
 
-    <Grid Grid.Row="3" Margin="18,0"><TextBlock Text="MT STUDIO  •  IDEIAS QUE VIRAM IDENTIDADE" Foreground="#56515A" FontSize="8" VerticalAlignment="Center"/><TextBlock Text="1 manter • 2 excluir • ← → navegar • Home/End início/fim • Shift = giro em 5° • Z desfazer • R resetar" Foreground="#56515A" FontSize="8" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+    <Grid Grid.Row="3" Margin="18,0"><TextBlock Text="MT STUDIO  •  ONDE IDEIAS VIRAM IDENTIDADE" Foreground="#867B8A" FontSize="9" VerticalAlignment="Center"/><TextBlock Text="1 manter  •  2 excluir  •  ← → navegar  •  Shift girar 5°  •  Z desfazer  •  R resetar" Foreground="#867B8A" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
 </Grid>
 </Window>
 '@
@@ -3534,7 +3581,7 @@ try {
 }
 
 foreach($n in @(
-    'btnUpdate','btnHome','btnNewProject','lblHomeProjects','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
+    'btnUpdate','btnHome','btnNewProject','lblHomeProjects','lblHomeReviewed','lblHomeKeep','lblHomeDelete','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
@@ -3551,6 +3598,8 @@ $script:SavedView=$null
 $script:LightLevel=50
 $script:CurrentTextures=@()
 $script:TextureCache = @{}
+$script:TextureCacheCost = @{}
+$script:TextureCacheBytes = [long]0
 $script:TextureCacheOrder = @()
 $script:TextureInfoCache = @{}
 $script:VariantIndex = @{}
@@ -3564,7 +3613,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.34'
+$script:AppVersion = '0.9.35'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
