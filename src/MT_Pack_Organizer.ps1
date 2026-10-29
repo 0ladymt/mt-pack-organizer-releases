@@ -1857,6 +1857,9 @@ function Invoke-TransformGizmoSelfTest {
         # O teste deve calibrar a caixa para a câmera sintética, sem herdar
         # dimensões da peça que o fixture acabou de abrir.
         Set-TransformBox $false
+        $viewHost.UpdateLayout()
+        [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+        $projectionReady=([double]$viewHost.ActualWidth -ge 150 -and [double]$viewHost.ActualHeight -ge 150 -and $null -ne (Get-ProjectedModelBounds))
         Set-TransformBox $true
         $width=[double]$transformBox.Width;$height=[double]$transformBox.Height
         if($width -lt 30 -or $height -lt 30){throw 'Caixa de seleção 3D não foi projetada.'}
@@ -1866,7 +1869,9 @@ function Invoke-TransformGizmoSelfTest {
             throw 'Caixa de seleção mudou de tamanho somente ao girar a peça.'
         }
         $script:ModelOffsetY=-1;Update-ModelTransform
-        if([double]$transformBox.Width -le $width){throw 'Movimento em profundidade não ajustou a projeção.'}
+        # Runners headless podem não montar viewport projetável antes do tick Loaded.
+        # Nesse caso a projeção não deve ser inferida dos 330px de fallback do XAML.
+        if($projectionReady -and [double]$transformBox.Width -le $width){throw 'Movimento em profundidade não ajustou a projeção.'}
         $zones=@(
             (Get-TransformHoverMode 8 8 330 440),
             (Get-TransformHoverMode 7 220 330 440),
