@@ -3495,15 +3495,23 @@ function Build-FiveMAddon {
     # UMA pasta/resource. Os packs sao DLC namespaces dentro dela.
     # A regra de 150 vale POR CATEGORIA em cada DLC.
     $folderDialog=New-Object System.Windows.Forms.FolderBrowserDialog
-    $folderDialog.Description='Selecione a pasta onde deseja salvar seu add-on.'
+    $folderDialog.Description='Selecione a pasta PAI ou a própria pasta vazia do add-on.'
     $folderDialog.ShowNewFolderButton=$true
     $folderDialog.SelectedPath=Split-Path $script:PackPath -Parent
     if($folderDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK){$lblBuildStatus.Text='Geração cancelada.';return}
-    $outRoot=Join-Path $folderDialog.SelectedPath $base
+    # Se a pessoa já criou/selecionou uma pasta com o nome do add-on,
+    # use-a diretamente. Evita "teste\teste" quando a escolha foi "teste".
+    $selectedFolder=[IO.Path]::GetFullPath($folderDialog.SelectedPath)
+    if($selectedFolder -ne [IO.Path]::GetPathRoot($selectedFolder)){$selectedFolder=$selectedFolder.TrimEnd('\')}
+    $selectedName=Split-Path $selectedFolder -Leaf
+    $outRoot=if($selectedName -ieq $base){$selectedFolder}else{Join-Path $selectedFolder $base}
     if(Test-Path -LiteralPath $outRoot){
-        Show-MTNotice 'PASTA JÁ EXISTE' "Já existe uma pasta com o nome '$base' nesse local.`n`nEscolha outro nome de add-on ou outro destino para preservar os arquivos existentes."
-        $lblBuildStatus.Text='Escolha outro nome ou destino.'
-        return
+        $existing=@(Get-ChildItem -LiteralPath $outRoot -Force -ErrorAction Stop | Select-Object -First 1)
+        if($existing.Count -gt 0){
+            Show-MTNotice 'PASTA JÁ EXISTE' "A pasta '$outRoot' já contém arquivos.`n`nSelecione uma pasta vazia ou escolha outro nome para preservar o conteúdo existente."
+            $lblBuildStatus.Text='Selecione uma pasta vazia ou altere o nome.'
+            return
+        }
     }
     if(-not (Confirm-MTAction 'CONFIRMAR GERAÇÃO' "Peças incluídas: $($kept.Count)`nNome do add-on: $base`n`nDestino: $outRoot`n`nSerá criada apenas essa pasta, com os arquivos do resource." 'GERAR ADD-ON')){
         $lblBuildStatus.Text='Geração cancelada.'
@@ -3765,15 +3773,15 @@ $xamlText = @'
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
             <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.0.0" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A432DC" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Name="packHeaderInfo" Visibility="Collapsed" Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓  ATUALIZAR" Width="114" Height="38" Margin="0,0,10,0" Padding="9,0" FontSize="11" FontWeight="Bold" Visibility="Collapsed" Background="#291333" BorderBrush="#8642AB" Foreground="#E9C3FF" ToolTip="Nova versão disponível para instalar"/><Button Name="btnHelp" Content="AJUDA" Width="85" Height="39" Margin="0,0,10,0" Padding="7,0" FontSize="11" FontWeight="Bold" ToolTip="Como usar e atalhos do aplicativo"/><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Padding="0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Canvas Width="22" Height="22"><Polygon Points="1,10 11,1 21,10" Fill="#D88BFF"/><Rectangle Canvas.Left="4" Canvas.Top="9" Width="14" Height="12" Fill="#D88BFF"/><Rectangle Canvas.Left="9" Canvas.Top="14" Width="5" Height="7" Fill="#211D28"/></Canvas></Button></StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Name="packHeaderInfo" Visibility="Collapsed" Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓  ATUALIZAR" Width="114" Height="38" Margin="0,0,10,0" Padding="9,0" FontSize="11" FontWeight="Bold" Visibility="Collapsed" Background="#291333" BorderBrush="#8642AB" Foreground="#E9C3FF" ToolTip="Nova versão disponível para instalar"/><Button Name="btnHelp" Content="AJUDA" Width="85" Height="39" Margin="0,0,10,0" Padding="7,0" FontSize="11" FontWeight="Bold" ToolTip="Como usar e atalhos do aplicativo"/><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Padding="0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Canvas Width="22" Height="22"><Polygon Points="1,10 11,1 21,10" Fill="#A432DC"/><Rectangle Canvas.Left="4" Canvas.Top="9" Width="14" Height="12" Fill="#A432DC"/><Rectangle Canvas.Left="9" Canvas.Top="14" Width="5" Height="7" Fill="#211D28"/></Canvas></Button></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
     </Border>
 
     <Grid Grid.Row="2" Name="emptyState" Margin="0,0" ClipToBounds="True">
         <!-- Textura street MT: grafismos apenas nas bordas, sem bloquear comandos nem projetos. -->
-        <Image Name="imgHomeGraffitiRight" Width="390" Height="700" HorizontalAlignment="Right" VerticalAlignment="Bottom" Stretch="Uniform" Opacity="0.32" IsHitTestVisible="False" Margin="0,0,-78,-80"/>
-        <Image Name="imgHomeGraffitiLeft" Width="310" Height="575" HorizontalAlignment="Left" VerticalAlignment="Top" Stretch="Uniform" Opacity="0.16" IsHitTestVisible="False" Margin="-85,-75,0,0" RenderTransformOrigin="0.5,0.5"><Image.RenderTransform><ScaleTransform ScaleX="-1"/></Image.RenderTransform></Image>
+        <Image Name="imgHomeGraffitiRight" Stretch="Fill" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Opacity="0.64" IsHitTestVisible="False"/>
+        <Image Name="imgHomeGraffitiLeft" Visibility="Collapsed" IsHitTestVisible="False"/>
         <Border MaxWidth="1160" Background="#101014" BorderBrush="#312B38" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="28,24" Padding="28">
             <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -3865,22 +3873,22 @@ $xamlText = @'
     <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#F009080D" Panel.ZIndex="99"><Border Width="510" Padding="30" Background="#17131D" BorderBrush="#654279" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel>
         <TextBlock Text="MT STUDIO  /  PREPARANDO PROJETO" Foreground="#BD8BD9" FontSize="10" FontWeight="Bold"/>
         <Canvas Width="360" Height="150" Margin="0,10,0,0" HorizontalAlignment="Center" ClipToBounds="True" Name="butterflyFlightStage">
-            <!-- A imagem aprovada pela MT preserva a silhueta; trajetórias independentes sem sobreposição. -->
-            <Canvas Width="100" Height="90" Canvas.Left="5" Canvas.Top="31" RenderTransformOrigin="0.5,0.5">
+            <!-- As duas borboletas percorrem o palco inteiro em Bezier, com retornos e voltas orgânicas. -->
+            <Canvas Width="90" Height="83" Canvas.Left="8" Canvas.Top="53" RenderTransformOrigin="0.5,0.5">
                 <Canvas.RenderTransform><TransformGroup><ScaleTransform ScaleX="1" ScaleY="1"/><RotateTransform Angle="-8"/></TransformGroup></Canvas.RenderTransform>
                 <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="5"/><SplineDoubleKeyFrame KeyTime="0:0:1.2" Value="100" KeySpline="0.36,0,0.64,1"/><SplineDoubleKeyFrame KeyTime="0:0:2.6" Value="10" KeySpline="0.2,0,0.8,1"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="85" KeySpline="0.36,0,0.64,1"/><SplineDoubleKeyFrame KeyTime="0:0:5.2" Value="5" KeySpline="0.2,0,0.8,1"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="31"/><SplineDoubleKeyFrame KeyTime="0:0:1.2" Value="7"/><SplineDoubleKeyFrame KeyTime="0:0:2.6" Value="55"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="13"/><SplineDoubleKeyFrame KeyTime="0:0:5.2" Value="31"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="-8"/><LinearDoubleKeyFrame KeyTime="0:0:1.2" Value="15"/><LinearDoubleKeyFrame KeyTime="0:0:2.6" Value="-19"/><LinearDoubleKeyFrame KeyTime="0:0:4" Value="12"/><LinearDoubleKeyFrame KeyTime="0:0:5.2" Value="-8"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingPath Storyboard.TargetProperty="(Canvas.Left)" Source="X" Duration="0:0:6.2" PathGeometry="M 8,53 C 40,7 130,5 190,55 C 255,107 290,30 245,17 C 205,-8 178,15 185,54 C 194,106 265,115 275,69 C 285,35 200,28 135,68 C 80,105 20,96 8,53"/>
+                    <DoubleAnimationUsingPath Storyboard.TargetProperty="(Canvas.Top)" Source="Y" Duration="0:0:6.2" PathGeometry="M 8,53 C 40,7 130,5 190,55 C 255,107 290,30 245,17 C 205,-8 178,15 185,54 C 194,106 265,115 275,69 C 285,35 200,28 135,68 C 80,105 20,96 8,53"/>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="-8"/><LinearDoubleKeyFrame KeyTime="0:0:1.4" Value="17"/><LinearDoubleKeyFrame KeyTime="0:0:2.9" Value="-23"/><LinearDoubleKeyFrame KeyTime="0:0:4.5" Value="20"/><LinearDoubleKeyFrame KeyTime="0:0:6.2" Value="-8"/></DoubleAnimationUsingKeyFrames>
                 </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
-                <Image Name="imgLoadingButterflyLeft" Width="100" Height="90" Stretch="Uniform"/>
+                <Image Name="imgLoadingButterflyLeft" Width="90" Height="83" Stretch="Uniform"/>
             </Canvas>
-            <Canvas Width="80" Height="76" Canvas.Left="270" Canvas.Top="30" RenderTransformOrigin="0.5,0.5">
+            <Canvas Width="80" Height="75" Canvas.Left="265" Canvas.Top="52" RenderTransformOrigin="0.5,0.5">
                 <Canvas.RenderTransform><TransformGroup><ScaleTransform ScaleX="-1" ScaleY="1"/><RotateTransform Angle="11"/></TransformGroup></Canvas.RenderTransform>
                 <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="270"/><SplineDoubleKeyFrame KeyTime="0:0:1.6" Value="215" KeySpline="0.34,0,0.66,1"/><SplineDoubleKeyFrame KeyTime="0:0:3.2" Value="280" KeySpline="0.2,0,0.8,1"/><SplineDoubleKeyFrame KeyTime="0:0:4.6" Value="205" KeySpline="0.34,0,0.66,1"/><SplineDoubleKeyFrame KeyTime="0:0:6.4" Value="270" KeySpline="0.2,0,0.8,1"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="30"/><SplineDoubleKeyFrame KeyTime="0:0:1.6" Value="62"/><SplineDoubleKeyFrame KeyTime="0:0:3.2" Value="9"/><SplineDoubleKeyFrame KeyTime="0:0:4.6" Value="49"/><SplineDoubleKeyFrame KeyTime="0:0:6.4" Value="30"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="11"/><LinearDoubleKeyFrame KeyTime="0:0:1.6" Value="-16"/><LinearDoubleKeyFrame KeyTime="0:0:3.2" Value="14"/><LinearDoubleKeyFrame KeyTime="0:0:4.6" Value="-11"/><LinearDoubleKeyFrame KeyTime="0:0:6.4" Value="11"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingPath Storyboard.TargetProperty="(Canvas.Left)" Source="X" Duration="0:0:5.5" PathGeometry="M 265,52 C 230,88 160,115 98,63 C 32,15 15,100 67,102 C 123,106 149,25 115,15 C 75,-2 43,41 90,61 C 145,91 218,12 265,52"/>
+                    <DoubleAnimationUsingPath Storyboard.TargetProperty="(Canvas.Top)" Source="Y" Duration="0:0:5.5" PathGeometry="M 265,52 C 230,88 160,115 98,63 C 32,15 15,100 67,102 C 123,106 149,25 115,15 C 75,-2 43,41 90,61 C 145,91 218,12 265,52"/>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="11"/><LinearDoubleKeyFrame KeyTime="0:0:1.2" Value="-18"/><LinearDoubleKeyFrame KeyTime="0:0:2.8" Value="22"/><LinearDoubleKeyFrame KeyTime="0:0:4.2" Value="-16"/><LinearDoubleKeyFrame KeyTime="0:0:5.5" Value="11"/></DoubleAnimationUsingKeyFrames>
                 </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
                 <Image Name="imgLoadingButterflyRight" Width="80" Height="76" Stretch="Uniform"/>
             </Canvas>
@@ -3947,7 +3955,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.45'
+$script:AppVersion = '0.9.46'
 $script:ButterflyFrameTimer=$null
 $script:ButterflyFrameIndex=0
 $script:ButterflyFrames=@()
