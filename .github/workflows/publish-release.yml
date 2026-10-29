@@ -63,6 +63,7 @@ jobs:
           Copy-Item -LiteralPath "src\assets\mt_butterfly_icon.png" -Destination "work\assets\mt_butterfly_icon.png" -Force
           # Asset aprovado pela MT: recriado em alta resolução, com transparência e roxo #A432DC.
           [IO.File]::WriteAllBytes("work\assets\mt_butterfly_icon.png",[Convert]::FromBase64String((Get-Content -Raw -LiteralPath "src\assets\mt_butterfly_approved.b64").Trim()))
+          [IO.File]::WriteAllBytes("work\assets\mt_butterfly_flight_sheet.png",[Convert]::FromBase64String((Get-Content -Raw -LiteralPath "src\assets\mt_butterfly_flight_sheet.b64").Trim()))
 
           # Valida a logo como imagem de verdade antes de publicar.
           Add-Type -AssemblyName System.Drawing
@@ -74,7 +75,8 @@ jobs:
           if ($src -notmatch [regex]::Escape($env:TARGET)) { throw "A versão $env:TARGET não apareceu na fonte." }
           foreach($asset in @(
             "work\assets\mt_logo.png",
-            "work\assets\mt_butterfly_icon.png"
+            "work\assets\mt_butterfly_icon.png",
+            "work\assets\mt_butterfly_flight_sheet.png"
           )){
             if (-not (Test-Path $asset)) { throw "Asset oficial ausente: $asset" }
             if ((Get-Item $asset).Length -lt 1000) { throw "Asset oficial inválido ou incompleto: $asset" }
@@ -157,6 +159,7 @@ jobs:
           Copy-Item work\MT_Pack_Organizer.ps1 build\app\payload\MT_Pack_Organizer.ps1 -Force
           Copy-Item work\assets\mt_logo.png build\app\payload\assets\mt_logo.png -Force
           Copy-Item work\assets\mt_butterfly_icon.png build\app\payload\assets\mt_butterfly_icon.png -Force
+          Copy-Item work\assets\mt_butterfly_flight_sheet.png build\app\payload\assets\mt_butterfly_flight_sheet.png -Force
           Copy-Item work\assets\mt_app_icon.ico build\app\payload\assets\mt_app_icon.ico -Force
 
           $main = @"
@@ -190,6 +193,7 @@ jobs:
               _ = writeFile(runtimeDir, "payload/MT_Pack_Organizer.ps1", "MT_Pack_Organizer.ps1")
               _ = writeFile(runtimeDir, "payload/assets/mt_logo.png", filepath.Join("assets", "mt_logo.png"))
               _ = writeFile(runtimeDir, "payload/assets/mt_butterfly_icon.png", filepath.Join("assets", "mt_butterfly_icon.png"))
+              _ = writeFile(runtimeDir, "payload/assets/mt_butterfly_flight_sheet.png", filepath.Join("assets", "mt_butterfly_flight_sheet.png"))
               _ = writeFile(runtimeDir, "payload/assets/mt_app_icon.ico", filepath.Join("assets", "mt_app_icon.ico"))
 
               ps := filepath.Join(runtimeDir, "MT_Pack_Organizer.ps1")
