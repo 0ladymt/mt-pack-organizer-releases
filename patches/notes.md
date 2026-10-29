@@ -1,3 +1,11 @@
+MT Pack Organizer 0.9.31
+
+- Janela de atualização substituída pelo diálogo escuro oficial, com versão, confirmação e botões roxos.
+- Desfoque isolado apenas no conteúdo do aplicativo: o carregamento e seu painel permanecem nítidos depois de nomear o projeto.
+- Gizmo revisado: removidos anéis e setas centrais; cantos fazem rotação horária/anti-horária, laterais giram um eixo e barras superior/inferior inclinam o outro. Realce âmbar discreto apenas no hover; Ctrl + rolagem altera a escala.
+- Tela inicial compacta o resumo em uma faixa única e destaca os cartões de projetos com nomes, estatísticas, caminho e progresso mais legíveis.
+- Testes adicionais de interface incluem diálogo de atualização e verificação de remoção do desfoque.
+
 MT Pack Organizer 0.9.30
 
 - Carregamento de projeto não herda o desfoque do diálogo de nomeação; o fundo volta ao foco antes da mensagem de indexação.
