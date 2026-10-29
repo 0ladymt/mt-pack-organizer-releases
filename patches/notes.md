@@ -1,3 +1,13 @@
+MT Pack Organizer 0.9.32
+
+- Caixa delimitadora reconstruída com base nas referências do Photoshop 3D: só a moldura cinza fina permanece visível depois de selecionar a peça; nenhum quadrado, barrinha ou anel aparece parado.
+- Mouse sobre o canto: aparecem quatro planos quadrados âmbar, e arrastar gira no eixo Z (horário/anti-horário).
+- Mouse sobre uma borda lateral: aparecem duas faixas verticais âmbar, e arrastar gira no eixo Y.
+- Mouse sobre a borda superior/inferior: aparecem duas faixas horizontais âmbar, e arrastar gira no eixo X.
+- Mouse na região interna: aparece somente o plano de movimento no eixo Z; Alt + arrastar move livremente. Ctrl + rolagem redimensiona sem alterar a rotação.
+- Destaques se apagam ao sair da caixa ou desfazer a seleção. Os controles são selecionados por regiões geométricas do mouse, não por elementos pequenos permanentes.
+- Testes verificam as quatro regiões do mouse, os destaques exclusivos por eixo e a estabilidade dimensional da caixa ao girar.
+
 MT Pack Organizer 0.9.31
 
 - Janela de atualização substituída pelo diálogo escuro oficial, com versão, confirmação e botões roxos.
