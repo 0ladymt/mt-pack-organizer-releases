@@ -1,3 +1,12 @@
+MT Pack Organizer 0.9.37
+
+- AJUDA sem interrogação e com conteúdo exclusivamente sobre uso e atualizações; botão SUPORTE separado no rodapé do modal, vinculado ao convite oficial do Discord MT STUDIO.
+- Ícone de casa redesenhado com telhado, paredes e porta reconhecíveis.
+- TODAS AS CATEGORIAS retorna à primeira peça, conforme fluxo de revisão solicitado.
+- ÚLTIMA PENDENTE busca desde o início a primeira peça não marcada em toda a ordem do pack, sem depender do filtro anterior; seleciona TODAS AS CATEGORIAS quando necessário.
+- Brincos p_ears recebem a orientação inicial de prévia que já existia para chapéus e óculos (inclinação 90° e orientação frontal), com botões manuais de ajuste.
+- Testes de UI atualizados para o fluxo global de pendências e reinício da categoria.
+
 MT Pack Organizer 0.9.36
 
 - Botão PRÓXIMA PENDENTE: encontra a próxima peça sem decisão no filtro de categoria ativo, com retorno circular ao início, sem alterar as marcações existentes; informa quando a categoria está totalmente revisada.
