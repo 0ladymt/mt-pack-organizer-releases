@@ -1677,8 +1677,28 @@ function Set-TransformBox([bool]$show) {
         }
         $transformBox.Visibility='Visible'
     }
-    else{$transformBox.Visibility='Collapsed';$script:SelectionBoxWidth=0.0;$script:SelectionBoxHeight=0.0}
+    else{
+        $transformBox.Visibility='Collapsed';$script:SelectionBoxWidth=0.0;$script:SelectionBoxHeight=0.0
+        Set-TransformHover ''
+    }
     Update-TransformBoxVisual
+}
+
+function Save-TransformGizmoPreview([string]$kind) {
+    if($env:MT_PACK_ORGANIZER_UITEST -ne '1' -or -not $env:MT_PACK_ORGANIZER_SCREENSHOT){return}
+    try {
+        [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+        $viewHost.UpdateLayout()
+        $w=[int]$viewHost.ActualWidth;$h=[int]$viewHost.ActualHeight
+        if($w -lt 150 -or $h -lt 150){return}
+        $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap $w,$h,96,96,([Windows.Media.PixelFormats]::Pbgra32)
+        $bitmap.Render($viewHost)
+        $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder
+        $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+        $dest=$env:MT_PACK_ORGANIZER_SCREENSHOT.Replace('.png',('-gizmo-'+$kind+'.png'))
+        $out=[IO.File]::Create($dest)
+        try{$encoder.Save($out)}finally{$out.Dispose()}
+    } catch {Write-AppLog ('Captura de gizmo '+$kind+': '+$_.Exception.Message)}
 }
 
 function Invoke-TransformGizmoSelfTest {
@@ -1705,13 +1725,39 @@ function Invoke-TransformGizmoSelfTest {
         }
         $script:ModelOffsetY=-1;Update-ModelTransform
         if([double]$transformBox.Width -le $width){throw 'Movimento em profundidade não ajustou a projeção.'}
+        $zones=@(
+            (Get-TransformHoverMode 8 8 330 440),
+            (Get-TransformHoverMode 7 220 330 440),
+            (Get-TransformHoverMode 165 7 330 440),
+            (Get-TransformHoverMode 165 220 330 440)
+        )
+        if(($zones -join ',') -ne 'ROTATE_ROLL,ROTATE_YAW,ROTATE_PITCH,MOVE_Z'){
+            throw ('Os quadrantes não mapearam os controles do Photoshop: '+($zones -join ','))
+        }
         Set-TransformHover 'ROTATE_ROLL'
-        if($rotNW.Opacity -lt 0.9 -or $transformHoverPlane.Visibility -ne 'Visible'){
-            throw 'O realce laranja da rotação pelos cantos não apareceu.'
+        Save-TransformGizmoPreview 'cantos'
+        if($hoverNW.Visibility -ne 'Visible' -or $hoverLeft.Visibility -ne 'Collapsed' -or $transformHoverPlane.Visibility -ne 'Collapsed'){
+            throw 'O hover do canto mostrou o destaque errado.'
+        }
+        Set-TransformHover 'ROTATE_YAW'
+        Save-TransformGizmoPreview 'lateral'
+        if($hoverLeft.Visibility -ne 'Visible' -or $hoverRight.Visibility -ne 'Visible' -or $hoverNW.Visibility -ne 'Collapsed'){
+            throw 'As faixas verticais não substituíram os quadrados.'
+        }
+        Set-TransformHover 'ROTATE_PITCH'
+        Save-TransformGizmoPreview 'superior'
+        if($hoverTop.Visibility -ne 'Visible' -or $hoverBottom.Visibility -ne 'Visible' -or $hoverLeft.Visibility -ne 'Collapsed'){
+            throw 'As faixas horizontais não substituíram as verticais.'
+        }
+        Set-TransformHover 'MOVE_Z'
+        Save-TransformGizmoPreview 'centro'
+        if($transformHoverPlane.Visibility -ne 'Visible' -or $hoverTop.Visibility -ne 'Collapsed'){
+            throw 'O plano central não foi isolado das bordas.'
         }
         Set-TransformHover ''
-        if($transformHoverPlane.Visibility -ne 'Collapsed'){
-            throw 'O realce da seleção continuou visível sem hover.'
+        Save-TransformGizmoPreview 'inativo'
+        if($transformHoverPlane.Visibility -ne 'Collapsed' -or $hoverNW.Visibility -ne 'Collapsed' -or $hoverLeft.Visibility -ne 'Collapsed'){
+            throw 'O gizmo continuou visível sem hover.'
         }
         Write-Host 'MT_PACK_ORGANIZER_GIZMO_SELFTEST_OK'
     } finally {
@@ -3418,18 +3464,19 @@ $xamlText = @'
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
             <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="10,7" CornerRadius="10" Background="#19141F" BorderBrush="#543064" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="☀" Foreground="#D88BFF" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="ILUMINAÇÃO" Foreground="#DCC3E8" FontWeight="Bold" FontSize="9" VerticalAlignment="Center" Margin="0,0,9,0"/><Button Name="btnLightDown" Content="−" Width="29" Height="28" Padding="0" FontSize="17"/><Border Background="#261B2C" CornerRadius="5" Width="48" Margin="5,0" Padding="2" VerticalAlignment="Center"><TextBlock Name="lblLightValue" Text="50%" FontSize="11" FontWeight="Bold" TextAlignment="Center" Foreground="#FFFFFF"/></Border><Button Name="btnLightUp" Content="+" Width="29" Height="28" Padding="0" FontSize="16"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
-                <Border BorderBrush="#A7A3AC" BorderThickness="1" Opacity="0.82" IsHitTestVisible="False"/>
-                <Border Name="transformHoverPlane" Background="#3BDCB26E" Visibility="Collapsed" IsHitTestVisible="False" Margin="1"/>
-                <Rectangle Name="rotNW" Width="8" Height="8" Fill="#DCC3A6" Stroke="#FFF0DD" StrokeThickness="0.8" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-4,-4,0,0" Cursor="Hand" ToolTip="Girar para a esquerda ou direita no plano"/>
-                <Rectangle Name="rotNE" Width="8" Height="8" Fill="#DCC3A6" Stroke="#FFF0DD" StrokeThickness="0.8" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0" Cursor="Hand" ToolTip="Girar para a esquerda ou direita no plano"/>
-                <Rectangle Name="rotSW" Width="8" Height="8" Fill="#DCC3A6" Stroke="#FFF0DD" StrokeThickness="0.8" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-4,0,0,-4" Cursor="Hand" ToolTip="Girar para a esquerda ou direita no plano"/>
-                <Rectangle Name="rotSE" Width="8" Height="8" Fill="#DCC3A6" Stroke="#FFF0DD" StrokeThickness="0.8" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-4,-4" Cursor="Hand" ToolTip="Girar para a esquerda ou direita no plano"/>
-                <Rectangle Name="rotTop" Width="26" Height="5" RadiusX="2" RadiusY="2" Fill="#DCC3A6" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-2,0,0" Cursor="Hand" ToolTip="Inclinar a peça para cima ou para baixo"/>
-                <Rectangle Name="rotBottom" Width="26" Height="5" RadiusX="2" RadiusY="2" Fill="#DCC3A6" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-2" Cursor="Hand" ToolTip="Inclinar a peça para cima ou para baixo"/>
-                <Rectangle Name="rotLeft" Width="5" Height="26" RadiusX="2" RadiusY="2" Fill="#DCC3A6" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-2,0,0,0" Cursor="Hand" ToolTip="Girar a peça para frente ou para trás"/>
-                <Rectangle Name="rotRight" Width="5" Height="26" RadiusX="2" RadiusY="2" Fill="#DCC3A6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-2,0" Cursor="Hand" ToolTip="Girar a peça para frente ou para trás"/>
+                <Border BorderBrush="#8E8A93" BorderThickness="0.85" Opacity="0.78" IsHitTestVisible="False"/>
+                <!-- Os destaques são desenhados sob demanda: nenhum puxador permanente. -->
+                <Border Name="transformHoverPlane" Background="#36E3B76A" Visibility="Collapsed" IsHitTestVisible="False" Margin="3"/>
+                <Rectangle Name="hoverLeft" Width="16" Fill="#68F1C87D" HorizontalAlignment="Left" Margin="3,29,0,29" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverRight" Width="16" Fill="#68F1C87D" HorizontalAlignment="Right" Margin="0,29,3,29" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverTop" Height="16" Fill="#68F1C87D" VerticalAlignment="Top" Margin="29,3,29,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverBottom" Height="16" Fill="#68F1C87D" VerticalAlignment="Bottom" Margin="29,0,29,3" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverNW" Width="28" Height="28" Fill="#8DF1C87D" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,2,0,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverNE" Width="28" Height="28" Fill="#8DF1C87D" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,2,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverSW" Width="28" Height="28" Fill="#8DF1C87D" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="2,0,0,2" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverSE" Width="28" Height="28" Fill="#8DF1C87D" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Visibility="Collapsed" IsHitTestVisible="False"/>
             </Grid>
-            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Name="lblTransformHint" Text="Arraste para mover • cantos = girar no plano • laterais = girar • Ctrl + rolagem = escala" Foreground="#A5A1AA" FontSize="9"/></Border>
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Name="lblTransformHint" Text="Selecione a peça • aproxime o mouse de uma borda ou canto • Ctrl + rolagem = escala" Foreground="#A5A1AA" FontSize="9"/></Border>
         </Grid></Border>
 
         <Border Grid.Column="4" Background="#111114" CornerRadius="13" BorderBrush="#2D2931" BorderThickness="1" Padding="15"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
@@ -3470,7 +3517,7 @@ try {
 foreach($n in @(
     'btnUpdate','btnHome','btnNewProject','lblHomeProjects','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -3498,7 +3545,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.31'
+$script:AppVersion = '0.9.32'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3715,42 +3762,63 @@ function Start-TransformDrag([string]$mode,$e) {
     $e.Handled=$true
 }
 
+function Get-TransformHoverMode([double]$x,[double]$y,[double]$width,[double]$height) {
+    # Zonas de hit-test independentes do desenho. A caixa continua fina; apenas
+    # a região sob o ponteiro revela os planos amarelos vistos no Photoshop 3D.
+    if($width -lt 35 -or $height -lt 35){return ''}
+    if($x -lt 0 -or $y -lt 0 -or $x -gt $width -or $y -gt $height){return ''}
+    $corner=[Math]::Min(43.0,[Math]::Min($width,$height)*0.24)
+    if(($x -le $corner -or $x -ge $width-$corner) -and ($y -le $corner -or $y -ge $height-$corner)){
+        return 'ROTATE_ROLL'
+    }
+    $edge=[Math]::Min(30.0,[Math]::Min($width,$height)*0.16)
+    if($x -le $edge -or $x -ge $width-$edge){return 'ROTATE_YAW'}
+    if($y -le $edge -or $y -ge $height-$edge){return 'ROTATE_PITCH'}
+    return 'MOVE_Z'
+}
+
 function Set-TransformHover([string]$mode) {
     if($script:TransformDragMode){$mode=[string]$script:TransformDragMode}
+    if($script:TransformHoverMode -eq $mode){return}
     $script:TransformHoverMode=$mode
-    if($transformHoverPlane){$transformHoverPlane.Visibility=if($mode -in @('ROTATE_YAW','ROTATE_PITCH','ROTATE_ROLL')){'Visible'}else{'Collapsed'}}
-    foreach($handle in @($rotNW,$rotNE,$rotSW,$rotSE,$rotTop,$rotBottom,$rotLeft,$rotRight)){
-        if($null -eq $handle){continue}
-        $handle.Fill=New-SolidBrush '#DCC3A6';$handle.Opacity=0.78
+    $transformHoverPlane.Visibility=if($mode -eq 'MOVE_Z'){'Visible'}else{'Collapsed'}
+    foreach($h in @($hoverNW,$hoverNE,$hoverSW,$hoverSE,$hoverLeft,$hoverRight,$hoverTop,$hoverBottom)){
+        $h.Visibility='Collapsed'
     }
-    $activeHandles=switch($mode){
-        'ROTATE_ROLL'{@($rotNW,$rotNE,$rotSW,$rotSE)}
-        'ROTATE_YAW'{@($rotLeft,$rotRight)}
-        'ROTATE_PITCH'{@($rotTop,$rotBottom)}
+    $active=switch($mode){
+        'ROTATE_ROLL'{@($hoverNW,$hoverNE,$hoverSW,$hoverSE)}
+        'ROTATE_YAW'{@($hoverLeft,$hoverRight)}
+        'ROTATE_PITCH'{@($hoverTop,$hoverBottom)}
         default{@()}
     }
-    foreach($handle in @($activeHandles)){
-        if($null -eq $handle){continue}
-        $handle.Fill=New-SolidBrush '#FFE0AE';$handle.Opacity=1
-    }
+    foreach($h in @($active)){if($null -ne $h){$h.Visibility='Visible'}}
+    $transformBox.Cursor=if($mode -eq 'ROTATE_ROLL'){'Hand'}elseif($mode -eq 'ROTATE_YAW'){'SizeWE'}elseif($mode -eq 'ROTATE_PITCH'){'SizeNS'}elseif($mode -eq 'MOVE_Z'){'SizeAll'}else{'Arrow'}
     if($lblTransformHint){
         $lblTransformHint.Text=switch($mode){
-            'ROTATE_YAW'{'BARRAS LATERAIS • girar para frente/para trás • Shift = 5°'}
-            'ROTATE_PITCH'{'BARRAS SUPERIOR/INFERIOR • inclinar para cima/baixo • Shift = 5°'}
-            'ROTATE_ROLL'{'CANTOS • rotação horária/anti-horária • Shift = 5°'}
-            'MOVE'{'ARRASTE A ÁREA SELECIONADA • mover livremente'}
-            default{'Arraste para mover • cantos = girar no plano • laterais = girar • Ctrl + rolagem = escala'}
+            'ROTATE_YAW'{'GIRAR EM TORNO DO EIXO Y • arraste a faixa vertical • Shift = 5°'}
+            'ROTATE_PITCH'{'GIRAR EM TORNO DO EIXO X • arraste a faixa horizontal • Shift = 5°'}
+            'ROTATE_ROLL'{'GIRAR EM TORNO DO EIXO Z • arraste o canto • Shift = 5°'}
+            'MOVE_Z'{'MOVER NO EIXO Z • arraste o plano • Alt + arrastar = mover livremente'}
+            'MOVE'{'MOVER LIVREMENTE • arraste a seleção'}
+            default{'Selecione a peça • aproxime o mouse de uma borda ou canto • Ctrl + rolagem = escala'}
         }
     }
 }
 
-$transformBox.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE' $e})
-foreach($h in @($rotLeft,$rotRight)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e}) }
-foreach($h in @($rotTop,$rotBottom)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e}) }
-foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e}) }
-foreach($g in @($rotLeft,$rotRight)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_YAW'})}
-foreach($g in @($rotTop,$rotBottom)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_PITCH'})}
-foreach($g in @($rotNW,$rotNE,$rotSW,$rotSE)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_ROLL'})}
+$transformBox.Add_MouseMove({
+    param($s,$e)
+    if($script:TransformDragMode){return}
+    $p=$e.GetPosition($transformBox)
+    $mode=Get-TransformHoverMode $p.X $p.Y $transformBox.ActualWidth $transformBox.ActualHeight
+    Set-TransformHover $mode
+})
+$transformBox.Add_MouseLeftButtonDown({
+    param($s,$e)
+    $p=$e.GetPosition($transformBox)
+    $mode=Get-TransformHoverMode $p.X $p.Y $transformBox.ActualWidth $transformBox.ActualHeight
+    if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Alt) -ne 0){$mode='MOVE'}
+    if($mode){Start-TransformDrag $mode $e}
+})
 $transformBox.Add_MouseLeave({if(-not $script:TransformDragMode){Set-TransformHover ''}})
 
 
