@@ -1,3 +1,10 @@
+MT Pack Organizer 0.9.38
+
+- Substituído o ícone de voltar por uma casa sólida roxo-clara com telhado, paredes e porta central.
+- Removidos totalmente os botões extras de giro/inclinação; a caixa delimitadora permanece como único controle de transformação 3D.
+- Vista inicial de p_head, p_eyes e p_ears recebe orientação frontal/vertical automaticamente; orientações manuais antigas dos botões não são mais reaplicadas.
+- Teste de interface verifica a nova casa sólida e a ausência de botões extras de orientação.
+
 MT Pack Organizer 0.9.37
 
 - AJUDA sem interrogação e com conteúdo exclusivamente sobre uso e atualizações; botão SUPORTE separado no rodapé do modal, vinculado ao convite oficial do Discord MT STUDIO.
