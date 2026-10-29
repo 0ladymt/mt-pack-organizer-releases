@@ -1,3 +1,11 @@
+MT Pack Organizer 0.9.35
+
+- Tela inicial reformulada como painel comercial compacto: hierarquia visual mais clara, botão de criação em destaque e totais de projetos, peças revisadas, mantidas e excluídas.
+- Cartões dos projetos com status de andamento/conclusão, espaçamentos consistentes e ação de continuar destacada; nomes, decisões, caminhos e progresso permanecem disponíveis.
+- Organizador com tipografia mais legível, painéis alinhados, melhor contraste dos textos secundários e cartões de decisão e geração de add-on refinados.
+- Identidade roxa MT STUDIO uniformizada em controles, bordas, campos e rodapé; caixa delimitadora 3D e fluxos de projeto preservados.
+- Cache de texturas decodificadas limitado por orçamento estimado de RAM (192 MiB) e quantidade, cache de malhas limitado e miniaturas agendadas com prioridade de segundo plano para reduzir pressão em PCs modestos.
+
 MT Pack Organizer 0.9.34
 
 - Removido inteiramente o retângulo roxo grande do interior da caixa delimitadora.
