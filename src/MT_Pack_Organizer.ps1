@@ -3815,18 +3815,29 @@ $xamlText = @'
 
     <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#F009080D" Panel.ZIndex="99"><Border Width="510" Padding="30" Background="#17131D" BorderBrush="#654279" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel>
         <TextBlock Text="MT STUDIO  /  PREPARANDO PROJETO" Foreground="#BD8BD9" FontSize="10" FontWeight="Bold"/>
-        <Canvas Width="220" Height="116" Margin="0,15,0,0" HorizontalAlignment="Center" ClipToBounds="False">
-            <Canvas Width="76" Height="76" Canvas.Left="32" Canvas.Top="21" RenderTransformOrigin="0.5,0.5">
-                <Canvas.RenderTransform><RotateTransform Angle="-14"/></Canvas.RenderTransform>
-                <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="-20" To="17" Duration="0:0:1.7" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="21" To="5" Duration="0:0:1.35" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)" From="32" To="62" Duration="0:0:2.3" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
-                <Image Name="imgWingLeftA" Width="76" Height="76"><Image.Clip><RectangleGeometry Rect="0,0,38,76"/></Image.Clip><Image.RenderTransform><ScaleTransform CenterX="38" ScaleX="1"/></Image.RenderTransform><Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.13" Duration="0:0:0.13" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers></Image>
-                <Image Name="imgWingRightA" Width="76" Height="76"><Image.Clip><RectangleGeometry Rect="38,0,38,76"/></Image.Clip><Image.RenderTransform><ScaleTransform CenterX="38" ScaleX="1"/></Image.RenderTransform><Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.13" Duration="0:0:0.13" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers></Image>
+        <Canvas Width="280" Height="150" Margin="0,10,0,0" HorizontalAlignment="Center" ClipToBounds="True">
+            <!-- Borboletas vetoriais: asas independentes, sem PNG nem artefatos embaixo. -->
+            <Canvas Width="92" Height="90" Canvas.Left="17" Canvas.Top="45" RenderTransformOrigin="0.5,0.5">
+                <Canvas.RenderTransform><RotateTransform Angle="-10"/></Canvas.RenderTransform>
+                <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="17"/><SplineDoubleKeyFrame KeyTime="0:0:2" Value="153" KeySpline="0.32,0.1,0.58,0.9"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="190" KeySpline="0.42,0,0.58,1"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="48" KeySpline="0.42,0,0.58,1"/><SplineDoubleKeyFrame KeyTime="0:0:8" Value="17" KeySpline="0.35,0,0.65,1"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="45"/><SplineDoubleKeyFrame KeyTime="0:0:2" Value="8"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="60"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="13"/><SplineDoubleKeyFrame KeyTime="0:0:8" Value="45"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="-16"/><LinearDoubleKeyFrame KeyTime="0:0:2" Value="23"/><LinearDoubleKeyFrame KeyTime="0:0:4" Value="-18"/><LinearDoubleKeyFrame KeyTime="0:0:6" Value="12"/><LinearDoubleKeyFrame KeyTime="0:0:8" Value="-16"/></DoubleAnimationUsingKeyFrames>
+                </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
+                <Path Fill="#B84AF1" Stroke="#E3A0FF" StrokeThickness="0.7" Data="M 45,42 C 29,3 2,8 8,29 C 12,40 24,43 40,47 C 14,47 15,80 33,75 C 43,70 44,54 46,47 Z"><Path.RenderTransform><ScaleTransform CenterX="46" ScaleX="1"/></Path.RenderTransform><Path.Triggers><EventTrigger RoutedEvent="Path.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.38" Duration="0:0:0.19" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Path.Triggers></Path>
+                <Path Fill="#B84AF1" Stroke="#E3A0FF" StrokeThickness="0.7" Data="M 47,42 C 63,3 90,8 84,29 C 80,40 68,43 52,47 C 78,47 77,80 59,75 C 49,70 48,54 46,47 Z"><Path.RenderTransform><ScaleTransform CenterX="46" ScaleX="1"/></Path.RenderTransform><Path.Triggers><EventTrigger RoutedEvent="Path.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.38" Duration="0:0:0.19" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Path.Triggers></Path>
+                <Ellipse Canvas.Left="43" Canvas.Top="32" Width="6" Height="33" Fill="#F0BDFF"/>
             </Canvas>
-            <Canvas Width="65" Height="65" Canvas.Left="122" Canvas.Top="13" RenderTransformOrigin="0.5,0.5">
-                <Canvas.RenderTransform><RotateTransform Angle="18"/></Canvas.RenderTransform>
-                <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="22" To="-19" Duration="0:0:1.45" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="13" To="36" Duration="0:0:1.85" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)" From="122" To="96" Duration="0:0:2.1" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
-                <Image Name="imgWingLeftB" Width="65" Height="65"><Image.Clip><RectangleGeometry Rect="0,0,32.5,65"/></Image.Clip><Image.RenderTransform><ScaleTransform CenterX="32.5" ScaleX="1"/></Image.RenderTransform><Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.13" Duration="0:0:0.17" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers></Image>
-                <Image Name="imgWingRightB" Width="65" Height="65"><Image.Clip><RectangleGeometry Rect="32.5,0,32.5,65"/></Image.Clip><Image.RenderTransform><ScaleTransform CenterX="32.5" ScaleX="1"/></Image.RenderTransform><Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.13" Duration="0:0:0.17" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers></Image>
+            <Canvas Width="78" Height="77" Canvas.Left="196" Canvas.Top="34" RenderTransformOrigin="0.5,0.5">
+                <Canvas.RenderTransform><RotateTransform Angle="14"/></Canvas.RenderTransform>
+                <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="196"/><SplineDoubleKeyFrame KeyTime="0:0:2.4" Value="38"/><SplineDoubleKeyFrame KeyTime="0:0:4.6" Value="115"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="225"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="196"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="34"/><SplineDoubleKeyFrame KeyTime="0:0:2.4" Value="66"/><SplineDoubleKeyFrame KeyTime="0:0:4.6" Value="5"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="58"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="34"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="15"/><LinearDoubleKeyFrame KeyTime="0:0:2.4" Value="-24"/><LinearDoubleKeyFrame KeyTime="0:0:4.6" Value="19"/><LinearDoubleKeyFrame KeyTime="0:0:7" Value="-12"/><LinearDoubleKeyFrame KeyTime="0:0:9" Value="15"/></DoubleAnimationUsingKeyFrames>
+                </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
+                <Path Fill="#9B36DB" Stroke="#E3A0FF" StrokeThickness="0.8" Data="M 38,35 C 23,2 2,7 7,25 C 11,37 19,39 34,40 C 13,42 13,68 28,65 C 37,61 39,45 39,39 Z"><Path.RenderTransform><ScaleTransform CenterX="39" ScaleX="1"/></Path.RenderTransform><Path.Triggers><EventTrigger RoutedEvent="Path.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.34" Duration="0:0:0.24" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Path.Triggers></Path>
+                <Path Fill="#9B36DB" Stroke="#E3A0FF" StrokeThickness="0.8" Data="M 40,35 C 55,2 76,7 71,25 C 67,37 59,39 44,40 C 65,42 65,68 50,65 C 41,61 39,45 39,39 Z"><Path.RenderTransform><ScaleTransform CenterX="39" ScaleX="1"/></Path.RenderTransform><Path.Triggers><EventTrigger RoutedEvent="Path.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.34" Duration="0:0:0.24" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Path.Triggers></Path>
+                <Ellipse Canvas.Left="36.5" Canvas.Top="28" Width="5" Height="28" Fill="#EBC1FF"/>
             </Canvas>
         </Canvas>
         <TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,11"/>
@@ -3863,7 +3874,7 @@ foreach($n in @(
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','btnNextPending','lblPendingJump','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','btnResetPosition','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
-    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgWingLeftA','imgWingRightA','imgWingLeftB','imgWingRightB','loadingOverlay','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
+    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','loadingOverlay','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
 
 $script:AddonNameSaved = $null
@@ -3891,7 +3902,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.41'
+$script:AppVersion = '0.9.42'
 $script:SupportDiscordUrl = 'https://discord.gg/MAPubH3vRw'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
@@ -3942,8 +3953,6 @@ try {
         $butterflyBitmap=New-Object Windows.Media.Imaging.BitmapImage
         $butterflyBitmap.BeginInit();$butterflyBitmap.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad
         $butterflyBitmap.UriSource=[Uri]::new($butterflyPath,[UriKind]::Absolute);$butterflyBitmap.EndInit();$butterflyBitmap.Freeze()
-        $imgWingLeftA.Source=$butterflyBitmap;$imgWingRightA.Source=$butterflyBitmap
-        $imgWingLeftB.Source=$butterflyBitmap;$imgWingRightB.Source=$butterflyBitmap
         $srcIcon=[System.Drawing.Bitmap]::FromFile($butterflyPath)
         $canvas=New-Object System.Drawing.Bitmap 256,256
         $g=[System.Drawing.Graphics]::FromImage($canvas)
