@@ -1684,6 +1684,23 @@ function Set-TransformBox([bool]$show) {
     Update-TransformBoxVisual
 }
 
+function Save-TransformGizmoPreview([string]$kind) {
+    if($env:MT_PACK_ORGANIZER_UITEST -ne '1' -or -not $env:MT_PACK_ORGANIZER_SCREENSHOT){return}
+    try {
+        [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+        $viewHost.UpdateLayout()
+        $w=[int]$viewHost.ActualWidth;$h=[int]$viewHost.ActualHeight
+        if($w -lt 150 -or $h -lt 150){return}
+        $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap $w,$h,96,96,([Windows.Media.PixelFormats]::Pbgra32)
+        $bitmap.Render($viewHost)
+        $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder
+        $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+        $dest=$env:MT_PACK_ORGANIZER_SCREENSHOT.Replace('.png',('-gizmo-'+$kind+'.png'))
+        $out=[IO.File]::Create($dest)
+        try{$encoder.Save($out)}finally{$out.Dispose()}
+    } catch {Write-AppLog ('Captura de gizmo '+$kind+': '+$_.Exception.Message)}
+}
+
 function Invoke-TransformGizmoSelfTest {
     $oldRoot=$script:ModelRoot;$oldCamera=$script:Camera;$oldBounds=$script:ModelBounds
     $oldDistance=$script:CameraDistance;$oldScale=$script:ModelScale
@@ -1718,22 +1735,27 @@ function Invoke-TransformGizmoSelfTest {
             throw ('Os quadrantes não mapearam os controles do Photoshop: '+($zones -join ','))
         }
         Set-TransformHover 'ROTATE_ROLL'
+        Save-TransformGizmoPreview 'cantos'
         if($hoverNW.Visibility -ne 'Visible' -or $hoverLeft.Visibility -ne 'Collapsed' -or $transformHoverPlane.Visibility -ne 'Collapsed'){
             throw 'O hover do canto mostrou o destaque errado.'
         }
         Set-TransformHover 'ROTATE_YAW'
+        Save-TransformGizmoPreview 'lateral'
         if($hoverLeft.Visibility -ne 'Visible' -or $hoverRight.Visibility -ne 'Visible' -or $hoverNW.Visibility -ne 'Collapsed'){
             throw 'As faixas verticais não substituíram os quadrados.'
         }
         Set-TransformHover 'ROTATE_PITCH'
+        Save-TransformGizmoPreview 'superior'
         if($hoverTop.Visibility -ne 'Visible' -or $hoverBottom.Visibility -ne 'Visible' -or $hoverLeft.Visibility -ne 'Collapsed'){
             throw 'As faixas horizontais não substituíram as verticais.'
         }
         Set-TransformHover 'MOVE_Z'
+        Save-TransformGizmoPreview 'centro'
         if($transformHoverPlane.Visibility -ne 'Visible' -or $hoverTop.Visibility -ne 'Collapsed'){
             throw 'O plano central não foi isolado das bordas.'
         }
         Set-TransformHover ''
+        Save-TransformGizmoPreview 'inativo'
         if($transformHoverPlane.Visibility -ne 'Collapsed' -or $hoverNW.Visibility -ne 'Collapsed' -or $hoverLeft.Visibility -ne 'Collapsed'){
             throw 'O gizmo continuou visível sem hover.'
         }
