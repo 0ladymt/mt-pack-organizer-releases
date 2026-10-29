@@ -101,6 +101,12 @@ function Write-AppLog([string]$text) {
 }
 function Show-Error([string]$message) {
     Write-AppLog $message
+    try {
+        if($null -ne $script:win -and $script:win.IsLoaded){
+            Show-MTNotice 'NÃO FOI POSSÍVEL CONCLUIR' $message
+            return
+        }
+    } catch {Write-AppLog ('Erro ao exibir aviso temático: '+$_.Exception.Message)}
     try { [System.Windows.MessageBox]::Show($message,'MT Pack Organizer','OK','Error') | Out-Null } catch {}
 }
 function Invoke-Safe([scriptblock]$Action) {
@@ -1079,6 +1085,37 @@ function New-ModalButton([string]$label,[bool]$primary=$false,[bool]$danger=$fal
     return $button
 }
 
+function Show-MTNotice([string]$heading,[string]$message) {
+    $modal=New-ProjectModal $heading $message 520 280
+    $ok=New-ModalButton 'ENTENDI' $true
+    $ok.Add_Click({$modal.Window.DialogResult=$true}.GetNewClosure())
+    [void]$modal.Footer.Children.Add($ok)
+    [void](Show-ProjectModal $modal.Window)
+}
+
+function Confirm-MTAction([string]$heading,[string]$message,[string]$confirmLabel='CONFIRMAR',[bool]$danger=$false) {
+    $modal=New-ProjectModal $heading $message 550 300
+    $cancel=New-ModalButton 'CANCELAR'
+    $confirm=New-ModalButton $confirmLabel (-not $danger) $danger
+    $cancel.Add_Click({$modal.Window.DialogResult=$false}.GetNewClosure())
+    $confirm.Add_Click({$modal.Window.DialogResult=$true}.GetNewClosure())
+    [void]$modal.Footer.Children.Add($cancel)
+    [void]$modal.Footer.Children.Add($confirm)
+    return ((Show-ProjectModal $modal.Window) -eq $true)
+}
+
+function Get-ActiveDecisionCounts {
+    $keep=0;$delete=0
+    foreach($piece in @($script:Pieces)) {
+        if(-not $script:Decisions.ContainsKey($piece.FullName)){continue}
+        switch([string]$script:Decisions[$piece.FullName]){
+            'MANTER' {$keep++}
+            'EXCLUIR' {$delete++}
+        }
+    }
+    return [pscustomobject]@{Keep=$keep;Delete=$delete;Done=($keep+$delete);Pending=($script:Pieces.Count-$keep-$delete)}
+}
+
 function Show-AppHelp {
     $modal=New-ProjectModal 'Ajuda e informações' 'MT STUDIO PACK ORGANIZER • orientações e canais oficiais' 570 535
     $dialog=$modal.Window
@@ -1189,6 +1226,11 @@ function Get-SavedProjectInfo([string]$path) {
             $info.Keep=@($decisions | Where-Object { $_.Value -eq 'MANTER' }).Count
             $info.Delete=@($decisions | Where-Object { $_.Value -eq 'EXCLUIR' }).Count
             $info.Total=[int]$state.total_pieces
+            # Versões anteriores guardavam decisões de arquivos já movidos no histórico.
+            if($null -ne $state.active_keep -and $null -ne $state.active_delete){
+                $info.Keep=[int]$state.active_keep
+                $info.Delete=[int]$state.active_delete
+            }
             $info.Index=[int]$state.index
             $info.Percent=if($info.Total -gt 0){[Math]::Min(100,[Math]::Round(100*($info.Keep+$info.Delete)/$info.Total))}else{0}
             if(-not [string]::IsNullOrWhiteSpace([string]$state.project_name)){$info.Name=[string]$state.project_name}
@@ -1336,12 +1378,15 @@ function Go-Home {
 function Save-State {
     if (-not $script:PackPath -or $script:AllowStateSave -eq $false) { return }
     if($txtAddonName){$script:AddonNameSaved=[string]$txtAddonName.Text}
+    $activeCounts=Get-ActiveDecisionCounts
     $obj = [ordered]@{
         version = 9
         project_name = $script:ProjectName
         pack = $script:PackPath
         index = $script:Index
         total_pieces = @($script:Pieces).Count
+        active_keep = $activeCounts.Keep
+        active_delete = $activeCounts.Delete
         view = [ordered]@{
             yaw=$script:Yaw; pitch=$script:Pitch; roll=$script:Roll
             scale=$script:ModelScale; offset_x=$script:ModelOffsetX; offset_y=$script:ModelOffsetY; offset_z=$script:ModelOffsetZ
@@ -2365,16 +2410,11 @@ function Toggle-TextureDelete {
 }
 
 function Update-Stats {
-    $keep = 0; $del = 0
-    foreach ($v in $script:Decisions.Values) {
-        if ($v -eq 'MANTER') { $keep++ }
-        elseif ($v -eq 'EXCLUIR') { $del++ }
-    }
-    $done = $keep + $del
-    $lblKeepCount.Text = [string]$keep
-    $lblDeleteCount.Text = [string]$del
-    $lblDone.Text = "$done / $($script:Pieces.Count)"
-    if ($script:Pieces.Count -gt 0) { $progress.Value = (100.0 * $done / $script:Pieces.Count) } else { $progress.Value = 0 }
+    $counts=Get-ActiveDecisionCounts
+    $lblKeepCount.Text = [string]$counts.Keep
+    $lblDeleteCount.Text = [string]$counts.Delete
+    $lblDone.Text = "$($counts.Done) / $($script:Pieces.Count)"
+    if ($script:Pieces.Count -gt 0) { $progress.Value = (100.0 * $counts.Done / $script:Pieces.Count) } else { $progress.Value = 0 }
 }
 
 function Update-Decision {
@@ -2405,8 +2445,8 @@ function Load-CurrentPiece {
     if ($script:Pieces.Count -eq 0) { return }
     $ydd = $script:Pieces[$script:Index]
 
-    $pieceNumber = Get-PieceDisplayNumber $ydd
-    $lblPieceIndex.Text = "$pieceNumber / {0:D4}" -f ([Math]::Max(0,$script:Pieces.Count-1))
+    # Índice de navegação, de 1 até a quantidade real; o ID 0000 da peça não é contador.
+    $lblPieceIndex.Text = ('{0:D2} / {1:D2}' -f ($script:Index+1),$script:Pieces.Count)
     $lblPieceName.Text = $ydd.Name
     $relative = $ydd.FullName.Substring($script:PackPath.Length).TrimStart('\')
     $lblPiecePath.Text = $relative
@@ -2960,17 +3000,14 @@ function Open-PackPath([string]$selectedPath) {
 
 function Apply-Removals {
     if (-not $script:PackPath) { return }
-    $pieceCount = @($script:Decisions.Values | Where-Object { $_ -eq 'EXCLUIR' }).Count
+    $pieceCount = (Get-ActiveDecisionCounts).Delete
     $textureCount = @($script:TextureDeletions.Keys).Count
     if ($pieceCount -eq 0 -and $textureCount -eq 0) {
-        [System.Windows.MessageBox]::Show('Nenhuma peça ou textura está marcada para excluir.','MT Pack Organizer') | Out-Null
+        Show-MTNotice 'SEM EXCLUSÕES' 'Nenhuma peça ou textura está marcada para excluir.'
         return
     }
 
-    $answer = [System.Windows.MessageBox]::Show(
-        "Aplicar exclusões?`n`nPeças: $pieceCount`nTexturas individuais: $textureCount`n`nTudo será movido para _PARA_EXCLUIR. Nada será apagado definitivamente.",
-        'Confirmar limpeza','YesNo','Question')
-    if ($answer -ne 'Yes') { return }
+    if(-not (Confirm-MTAction 'CONFIRMAR EXCLUSÕES' "Peças: $pieceCount`nTexturas individuais: $textureCount`n`nOs arquivos serão movidos para _PARA_EXCLUIR. Nenhum será apagado definitivamente." 'MOVER ARQUIVOS' $true)){return}
 
     $dest = Join-Path $script:PackPath '_PARA_EXCLUIR'
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
@@ -3012,12 +3049,11 @@ function Apply-Removals {
     }
 
     Save-State
-    [System.Windows.MessageBox]::Show(
-        "$movedPieces peça(s) e $movedTextures textura(s) individual(is) movida(s) para _PARA_EXCLUIR.`nNenhum arquivo foi apagado.",
-        'MT Pack Organizer') | Out-Null
+    Show-MTNotice 'EXCLUSÕES APLICADAS' "$movedPieces peça(s) e $movedTextures textura(s) individual(is) movida(s) para _PARA_EXCLUIR.`nNenhum arquivo foi apagado."
 
     $script:Index = 0
     Rescan-Pieces
+    Save-State
     Load-CurrentPiece
 }
 
@@ -3449,23 +3485,33 @@ function Build-FiveMAddon {
     $kept=@(Get-KeptBuildPieces)
     if($kept.Count -eq 0){[System.Windows.MessageBox]::Show('Nenhuma peça marcada como MANTER com textura válida.','MT Studio')|Out-Null;return}
 
-    $pending=$script:Pieces.Count-@($script:Decisions.Values).Count
+    $pending=(Get-ActiveDecisionCounts).Pending
     if($pending -gt 0) {
-        $ans=[System.Windows.MessageBox]::Show("Ainda existem $pending peça(s) pendentes. Elas NÃO entrarão no add-on. Continuar?",'MT Studio','YesNo','Question')
-        if($ans -ne 'Yes'){return}
+        if(-not (Confirm-MTAction 'PEÇAS PENDENTES' "Ainda existem $pending peça(s) pendentes. Elas NÃO entrarão no add-on.`n`nDeseja continuar?" 'CONTINUAR')){return}
     }
 
     $base=Convert-ToAddonName $txtAddonName.Text
     $txtAddonName.Text=$base
+    # UMA pasta/resource. Os packs sao DLC namespaces dentro dela.
+    # A regra de 150 vale POR CATEGORIA em cada DLC.
+    $folderDialog=New-Object System.Windows.Forms.FolderBrowserDialog
+    $folderDialog.Description='Selecione a pasta onde deseja salvar seu add-on.'
+    $folderDialog.ShowNewFolderButton=$true
+    $folderDialog.SelectedPath=Split-Path $script:PackPath -Parent
+    if($folderDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK){$lblBuildStatus.Text='Geração cancelada.';return}
+    $outRoot=Join-Path $folderDialog.SelectedPath $base
+    if(Test-Path -LiteralPath $outRoot){
+        Show-MTNotice 'PASTA JÁ EXISTE' "Já existe uma pasta com o nome '$base' nesse local.`n`nEscolha outro nome de add-on ou outro destino para preservar os arquivos existentes."
+        $lblBuildStatus.Text='Escolha outro nome ou destino.'
+        return
+    }
+    if(-not (Confirm-MTAction 'CONFIRMAR GERAÇÃO' "Peças incluídas: $($kept.Count)`nNome do add-on: $base`n`nDestino: $outRoot`n`nSerá criada apenas essa pasta, com os arquivos do resource." 'GERAR ADD-ON')){
+        $lblBuildStatus.Text='Geração cancelada.'
+        return
+    }
     $lblBuildStatus.Text='Preparando DLCs...'
     [System.Windows.Forms.Application]::DoEvents()
     Ensure-AddonBuilderBackend
-
-    # UMA pasta/resource. Os packs sao DLC namespaces dentro dela.
-    # A regra de 150 vale POR CATEGORIA em cada DLC.
-    $packRoot=Split-Path $script:PackPath -Parent
-    $stamp=Get-Date -Format 'yyyyMMdd_HHmmss'
-    $outRoot=Join-Path $packRoot ("MT_ADDONS_GERADOS\${base}_$stamp")
     $stream=Join-Path $outRoot 'stream'
     New-Item -ItemType Directory -Force -Path $stream | Out-Null
 
@@ -3586,15 +3632,13 @@ Estrutura: UM ÚNICO RESOURCE
 Limite: 150 peças POR CATEGORIA em cada DLC
 DLCs: $($made -join ', ')
 Pastas: stream/[female|male]/categoria
-Compactação ZIP: desativada para geração rápida
-Regras: _r -> _whi | _u -> _uni | máscara/chapéu escondem cabelo somente quando marcados
 
 Distribuição:
 $($categoryLines -join [Environment]::NewLine)
 "@
     Set-Content -LiteralPath (Join-Path $outRoot 'BUILD_SUMMARY.txt') -Value $summary -Encoding UTF8
     $lblBuildStatus.Text="Concluído: 1 resource / $($made.Count) DLC(s)"
-    [System.Windows.MessageBox]::Show("Add-on gerado com sucesso.`n`n1 resource com $($made.Count) DLC(s).`n$outRoot",'MT Studio')|Out-Null
+    Show-MTNotice 'ADD-ON GERADO!' "Seu add-on foi gerado com sucesso.`n`n1 resource com $($made.Count) DLC(s).`n`nDestino: $outRoot"
     Start-Process explorer.exe $outRoot
 }
 
@@ -3726,11 +3770,14 @@ $xamlText = @'
         </Grid>
     </Border>
 
-    <Grid Grid.Row="2" Name="emptyState" Margin="28,22">
-        <Border MaxWidth="1160" Background="#101014" BorderBrush="#312B38" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Stretch" VerticalAlignment="Top" Padding="28">
+    <Grid Grid.Row="2" Name="emptyState" Margin="0,0" ClipToBounds="True">
+        <!-- Textura street MT: grafismos apenas nas bordas, sem bloquear comandos nem projetos. -->
+        <Image Name="imgHomeGraffitiRight" Width="390" Height="700" HorizontalAlignment="Right" VerticalAlignment="Bottom" Stretch="Uniform" Opacity="0.32" IsHitTestVisible="False" Margin="0,0,-78,-80"/>
+        <Image Name="imgHomeGraffitiLeft" Width="310" Height="575" HorizontalAlignment="Left" VerticalAlignment="Top" Stretch="Uniform" Opacity="0.16" IsHitTestVisible="False" Margin="-85,-75,0,0" RenderTransformOrigin="0.5,0.5"><Image.RenderTransform><ScaleTransform ScaleX="-1"/></Image.RenderTransform></Image>
+        <Border MaxWidth="1160" Background="#101014" BorderBrush="#312B38" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="28,24" Padding="28">
             <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                    <StackPanel><TextBlock Text="ESPAÇO DE TRABALHO" Foreground="#BE8BD8" FontSize="10" FontWeight="Bold"/><TextBlock Text="Seus projetos" FontSize="29" FontWeight="Bold" Margin="0,5,0,0"/><TextBlock Text="Todos os packs em um só lugar, com suas decisões e progresso preservados." Foreground="#AAA1B0" FontSize="12" Margin="0,8,0,0"/></StackPanel>
+                    <StackPanel><TextBlock Text="MT STUDIO  /  ESPAÇO CRIATIVO" Foreground="#A432DC" FontSize="10" FontWeight="Bold"/><TextBlock Text="Seus projetos" FontSize="29" FontWeight="Bold" Margin="0,5,0,0"/><TextBlock Text="VISUALIZE. ORGANIZE. TRANSFORME." FontSize="10" Foreground="#C7B2D4" FontWeight="SemiBold" Margin="0,7,0,0"/><TextBlock Text="Todos os packs em um só lugar, com suas decisões e progresso preservados." Foreground="#AAA1B0" FontSize="12" Margin="0,8,0,0"/></StackPanel>
                     <Button Name="btnNewProject" Grid.Column="1" Content="+  NOVO PROJETO" Style="{StaticResource PrimaryButton}" Height="46" Width="182" FontSize="12" FontWeight="Bold" VerticalAlignment="Center"/>
                 </Grid>
                 <Border Grid.Row="1" Background="#18151E" BorderBrush="#342B3A" BorderThickness="1" CornerRadius="11" Margin="0,23,0,19" Padding="20,16">
@@ -3817,23 +3864,23 @@ $xamlText = @'
 
     <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#F009080D" Panel.ZIndex="99"><Border Width="510" Padding="30" Background="#17131D" BorderBrush="#654279" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel>
         <TextBlock Text="MT STUDIO  /  PREPARANDO PROJETO" Foreground="#BD8BD9" FontSize="10" FontWeight="Bold"/>
-        <Canvas Width="280" Height="150" Margin="0,10,0,0" HorizontalAlignment="Center" ClipToBounds="True" Name="butterflyFlightStage">
+        <Canvas Width="360" Height="150" Margin="0,10,0,0" HorizontalAlignment="Center" ClipToBounds="True" Name="butterflyFlightStage">
             <!-- A imagem aprovada pela MT preserva a silhueta; trajetórias independentes sem sobreposição. -->
             <Canvas Width="100" Height="90" Canvas.Left="5" Canvas.Top="31" RenderTransformOrigin="0.5,0.5">
                 <Canvas.RenderTransform><TransformGroup><ScaleTransform ScaleX="1" ScaleY="1"/><RotateTransform Angle="-8"/></TransformGroup></Canvas.RenderTransform>
                 <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="5"/><SplineDoubleKeyFrame KeyTime="0:0:3" Value="55" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="14" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="5" KeySpline="0.38,0,0.62,1"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="31"/><SplineDoubleKeyFrame KeyTime="0:0:3" Value="8"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="49"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="31"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="-8"/><LinearDoubleKeyFrame KeyTime="0:0:3" Value="12"/><LinearDoubleKeyFrame KeyTime="0:0:6" Value="-10"/><LinearDoubleKeyFrame KeyTime="0:0:9" Value="-8"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="5"/><SplineDoubleKeyFrame KeyTime="0:0:1.2" Value="100" KeySpline="0.36,0,0.64,1"/><SplineDoubleKeyFrame KeyTime="0:0:2.6" Value="10" KeySpline="0.2,0,0.8,1"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="85" KeySpline="0.36,0,0.64,1"/><SplineDoubleKeyFrame KeyTime="0:0:5.2" Value="5" KeySpline="0.2,0,0.8,1"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="31"/><SplineDoubleKeyFrame KeyTime="0:0:1.2" Value="7"/><SplineDoubleKeyFrame KeyTime="0:0:2.6" Value="55"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="13"/><SplineDoubleKeyFrame KeyTime="0:0:5.2" Value="31"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="-8"/><LinearDoubleKeyFrame KeyTime="0:0:1.2" Value="15"/><LinearDoubleKeyFrame KeyTime="0:0:2.6" Value="-19"/><LinearDoubleKeyFrame KeyTime="0:0:4" Value="12"/><LinearDoubleKeyFrame KeyTime="0:0:5.2" Value="-8"/></DoubleAnimationUsingKeyFrames>
                 </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
                 <Image Name="imgLoadingButterflyLeft" Width="100" Height="90" Stretch="Uniform"/>
             </Canvas>
-            <Canvas Width="80" Height="76" Canvas.Left="191" Canvas.Top="30" RenderTransformOrigin="0.5,0.5">
-                <Canvas.RenderTransform><TransformGroup><ScaleTransform ScaleX="1" ScaleY="1"/><RotateTransform Angle="11"/></TransformGroup></Canvas.RenderTransform>
+            <Canvas Width="80" Height="76" Canvas.Left="270" Canvas.Top="30" RenderTransformOrigin="0.5,0.5">
+                <Canvas.RenderTransform><TransformGroup><ScaleTransform ScaleX="-1" ScaleY="1"/><RotateTransform Angle="11"/></TransformGroup></Canvas.RenderTransform>
                 <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="191"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="151" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="193" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:11" Value="191" KeySpline="0.38,0,0.62,1"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="30"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="58"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="12"/><SplineDoubleKeyFrame KeyTime="0:0:11" Value="30"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="11"/><LinearDoubleKeyFrame KeyTime="0:0:4" Value="-13"/><LinearDoubleKeyFrame KeyTime="0:0:7" Value="9"/><LinearDoubleKeyFrame KeyTime="0:0:11" Value="11"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="270"/><SplineDoubleKeyFrame KeyTime="0:0:1.6" Value="215" KeySpline="0.34,0,0.66,1"/><SplineDoubleKeyFrame KeyTime="0:0:3.2" Value="280" KeySpline="0.2,0,0.8,1"/><SplineDoubleKeyFrame KeyTime="0:0:4.6" Value="205" KeySpline="0.34,0,0.66,1"/><SplineDoubleKeyFrame KeyTime="0:0:6.4" Value="270" KeySpline="0.2,0,0.8,1"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="30"/><SplineDoubleKeyFrame KeyTime="0:0:1.6" Value="62"/><SplineDoubleKeyFrame KeyTime="0:0:3.2" Value="9"/><SplineDoubleKeyFrame KeyTime="0:0:4.6" Value="49"/><SplineDoubleKeyFrame KeyTime="0:0:6.4" Value="30"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="11"/><LinearDoubleKeyFrame KeyTime="0:0:1.6" Value="-16"/><LinearDoubleKeyFrame KeyTime="0:0:3.2" Value="14"/><LinearDoubleKeyFrame KeyTime="0:0:4.6" Value="-11"/><LinearDoubleKeyFrame KeyTime="0:0:6.4" Value="11"/></DoubleAnimationUsingKeyFrames>
                 </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
                 <Image Name="imgLoadingButterflyRight" Width="80" Height="76" Stretch="Uniform"/>
             </Canvas>
@@ -3872,7 +3919,7 @@ foreach($n in @(
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','btnNextPending','lblPendingJump','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','btnResetPosition','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
-    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','loadingOverlay','imgLoadingButterflyLeft','imgLoadingButterflyRight','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
+    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgHomeGraffitiLeft','imgHomeGraffitiRight','loadingOverlay','imgLoadingButterflyLeft','imgLoadingButterflyRight','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
 
 $script:AddonNameSaved = $null
@@ -3900,7 +3947,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.44'
+$script:AppVersion = '0.9.45'
 $script:ButterflyFrameTimer=$null
 $script:ButterflyFrameIndex=0
 $script:ButterflyFrames=@()
@@ -3949,6 +3996,15 @@ try {
         $bi.UriSource=[Uri]::new($logoPath,[UriKind]::Absolute);$bi.EndInit();$bi.Freeze()
         $imgBrandLogo.Source=$bi;$imgEmptyLogo.Source=$bi
     }
+    $graffitiPath=Join-Path $PSScriptRoot 'assets\mt_home_graffiti.png'
+    if(Test-Path $graffitiPath){
+        $graffitiBitmap=New-Object Windows.Media.Imaging.BitmapImage
+        $graffitiBitmap.BeginInit();$graffitiBitmap.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $graffitiBitmap.UriSource=[Uri]::new($graffitiPath,[UriKind]::Absolute)
+        $graffitiBitmap.EndInit();$graffitiBitmap.Freeze()
+        $imgHomeGraffitiLeft.Source=$graffitiBitmap
+        $imgHomeGraffitiRight.Source=$graffitiBitmap
+    }
     Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
     if(Test-Path $butterflyPath){
         $butterflyBitmap=New-Object Windows.Media.Imaging.BitmapImage
@@ -3972,9 +4028,9 @@ try {
             $imgLoadingButterflyLeft.Source=$script:ButterflyFrames[0]
             $imgLoadingButterflyRight.Source=$script:ButterflyFrames[10]
             $script:ButterflyFrameTimer=New-Object Windows.Threading.DispatcherTimer
-            $script:ButterflyFrameTimer.Interval=[TimeSpan]::FromMilliseconds(65)
+            $script:ButterflyFrameTimer.Interval=[TimeSpan]::FromMilliseconds(45)
             $script:ButterflyFrameTimer.Add_Tick({
-                $script:ButterflyFrameIndex=($script:ButterflyFrameIndex+1) % 32
+                $script:ButterflyFrameIndex=($script:ButterflyFrameIndex+3) % 32
                 $imgLoadingButterflyLeft.Source=$script:ButterflyFrames[$script:ButterflyFrameIndex]
                 $imgLoadingButterflyRight.Source=$script:ButterflyFrames[(($script:ButterflyFrameIndex+10) % 32)]
             })
