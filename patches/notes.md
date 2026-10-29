@@ -1,3 +1,10 @@
+MT Pack Organizer 0.9.33
+
+- Manipulador central 3D restaurado com setas nos eixos X (vermelho), Y (azul/profundidade) e Z (verde/altura), cada uma com hover e arraste específicos.
+- Plano de destaque da região interna reduzido com margens de 34 px nas laterais e 29 px em cima/baixo, sem encostar na moldura da caixa.
+- Todas as áreas de hover da caixa passaram de amarelo-alaranjado para roxo-claro, alinhado à identidade MT STUDIO.
+- Mantém moldura fina e faixas/cantos condicionais da v0.9.32; testes verificam os três eixos centrais e o tamanho do plano.
+
 MT Pack Organizer 0.9.32
 
 - Caixa delimitadora reconstruída com base nas referências do Photoshop 3D: só a moldura cinza fina permanece visível depois de selecionar a peça; nenhum quadrado, barrinha ou anel aparece parado.
