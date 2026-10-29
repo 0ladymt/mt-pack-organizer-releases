@@ -992,22 +992,25 @@ function New-ProjectModal([string]$heading,[string]$description,[int]$width=500,
     return [pscustomobject]@{Window=$dialog;Content=$content;Footer=$footer;Close=$close}
 }
 
+function Clear-ProjectModalEffects {
+    # Nunca aplique BlurEffect no Grid raiz: ele também contém o loader.
+    foreach($element in @($topHeader,$emptyState,$mainContent)){
+        if($null -ne $element){$element.Effect=$null}
+    }
+    if($null -ne $win.Content){$win.Content.Effect=$null}
+}
+
 function Show-ProjectModal([Windows.Window]$dialog) {
-    # Blur apenas no conteúdo da janela principal; o modal permanece nítido.
-    $root=$win.Content
-    $previousEffect=$root.Effect
     try {
+        Clear-ProjectModalEffects
         $blur=New-Object Windows.Media.Effects.BlurEffect
         $blur.Radius=10;$blur.KernelType='Gaussian'
-        $root.Effect=$blur
+        foreach($element in @($topHeader,$emptyState,$mainContent)){
+            if($null -ne $element){$element.Effect=$blur}
+        }
         return $dialog.ShowDialog()
     } finally {
-        $root.Effect=$previousEffect
-        # O diálogo fecha antes de qualquer operação de indexação/carregamento.
-        # Atualize a composição para não deixar o efeito anterior no frame seguinte.
-        if($win.Dispatcher.CheckAccess()){
-            [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
-        }
+        Clear-ProjectModalEffects
     }
 }
 
@@ -1038,7 +1041,7 @@ function New-ModalButton([string]$label,[bool]$primary=$false,[bool]$danger=$fal
 
 function Save-ModalPreview([Windows.Window]$dialog,[string]$kind) {
     if($env:MT_PACK_ORGANIZER_UITEST -ne '1' -or -not $env:MT_PACK_ORGANIZER_SCREENSHOT){return}
-    if(-not ($win.Content.Effect -is [Windows.Media.Effects.BlurEffect])){
+    if(-not ($emptyState.Effect -is [Windows.Media.Effects.BlurEffect])){
         throw 'O fundo da janela principal não foi desfocado ao abrir o menu.'
     }
     try {
@@ -1170,28 +1173,28 @@ function Refresh-RecentProjects {
         $item=New-Object Windows.Controls.ListBoxItem
         $item.Tag=[string]$path
         $panel=New-Object Windows.Controls.Grid
-        $panel.Margin='8,6'
+        $panel.Margin='12,10'
         $panel.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
         $rightCol=New-Object Windows.Controls.ColumnDefinition;$rightCol.Width='Auto';$panel.ColumnDefinitions.Add($rightCol)
         $left=New-Object Windows.Controls.StackPanel
         $name=New-Object Windows.Controls.TextBlock
         $name.Text=[string]$summary.Name
-        $name.FontWeight='Bold';$name.FontSize=15
+        $name.FontWeight='Bold';$name.FontSize=17
         [void]$left.Children.Add($name)
         $details=New-Object Windows.Controls.TextBlock
-        $details.Margin='0,8,0,7';$details.FontSize=11;$details.Foreground=New-SolidBrush '#B9AFC0'
-        $details.Text="MANTER  $($summary.Keep)     EXCLUIR  $($summary.Delete)     $($summary.Percent)% CONCLUÍDO     PEÇA $([int]$summary.Index+1)/$($summary.Total)"
+        $details.Margin='0,9,0,10';$details.FontSize=12;$details.Foreground=New-SolidBrush '#C6B6CC'
+        $details.Text="MANTER  $($summary.Keep)    •    EXCLUIR  $($summary.Delete)    •    $($summary.Percent)% CONCLUÍDO    •    PEÇA $([int]$summary.Index+1)/$($summary.Total)"
         [void]$left.Children.Add($details)
         $bar=New-Object Windows.Controls.ProgressBar
-        $bar.Height=5;$bar.Maximum=100;$bar.Value=[double]$summary.Percent
+        $bar.Height=6;$bar.Maximum=100;$bar.Value=[double]$summary.Percent
         $bar.Foreground=New-SolidBrush '#A432DC';$bar.Background=New-SolidBrush '#302637'
-        $bar.MaxWidth=530;$bar.HorizontalAlignment='Stretch'
+        $bar.MinWidth=320;$bar.HorizontalAlignment='Stretch'
         [void]$left.Children.Add($bar)
         $pathText=New-Object Windows.Controls.TextBlock
-        $pathText.Text=[string]$path;$pathText.FontSize=9;$pathText.Foreground=New-SolidBrush '#77717D'
-        $pathText.Margin='0,8,0,0';$pathText.TextTrimming='CharacterEllipsis';[void]$left.Children.Add($pathText)
+        $pathText.Text=[string]$path;$pathText.FontSize=10;$pathText.Foreground=New-SolidBrush '#92889B'
+        $pathText.Margin='0,10,0,0';$pathText.TextTrimming='CharacterEllipsis';[void]$left.Children.Add($pathText)
         [Windows.Controls.Grid]::SetColumn($left,0);[void]$panel.Children.Add($left)
-        $actions=New-Object Windows.Controls.StackPanel;$actions.Orientation='Vertical';$actions.Margin='22,0,0,0'
+        $actions=New-Object Windows.Controls.StackPanel;$actions.Orientation='Vertical';$actions.Margin='24,0,0,0'
         $open=New-Object Windows.Controls.Button;$open.Content='CONTINUAR  ›';$open.Width=125;$open.Height=36;$open.Padding='2'
         $rename=New-Object Windows.Controls.Button;$rename.Content='RENOMEAR';$rename.Width=125;$rename.Height=34;$rename.Padding='2';$rename.Margin='0,7,0,0'
         $remove=New-Object Windows.Controls.Button;$remove.Content='EXCLUIR PROJETO';$remove.Width=125;$remove.Height=34;$remove.Padding='2';$remove.Margin='0,7,0,0'
@@ -1703,11 +1706,13 @@ function Invoke-TransformGizmoSelfTest {
         $script:ModelOffsetY=-1;Update-ModelTransform
         if([double]$transformBox.Width -le $width){throw 'Movimento em profundidade não ajustou a projeção.'}
         Set-TransformHover 'ROTATE_ROLL'
-        if($gizmoRoll.Opacity -lt 0.9 -or $gizmoYaw.Opacity -ge 0.5 -or $transformHoverPlane.Visibility -ne 'Visible'){
-            throw 'O realce de eixos do gizmo não alternou corretamente.'
+        if($rotNW.Opacity -lt 0.9 -or $transformHoverPlane.Visibility -ne 'Visible'){
+            throw 'O realce laranja da rotação pelos cantos não apareceu.'
         }
-        Set-TransformHover 'MOVE_Y'
-        if($axisY.StrokeThickness -lt 4){throw 'A seta do eixo de profundidade não foi destacada.'}
+        Set-TransformHover ''
+        if($transformHoverPlane.Visibility -ne 'Collapsed'){
+            throw 'O realce da seleção continuou visível sem hover.'
+        }
         Write-Host 'MT_PACK_ORGANIZER_GIZMO_SELFTEST_OK'
     } finally {
         Set-TransformBox $false;Set-TransformHover ''
@@ -2299,9 +2304,7 @@ function Undo-Last {
 function Set-Loading([bool]$show,[string]$message='Preparando pack...') {
     if($null -eq $loadingOverlay){return}
     if($show){
-        # A transição de modal para carregamento não deve herdar o desfoque.
-        # O overlay de carregamento já tem o próprio fundo escurecido.
-        $win.Content.Effect=$null
+        Clear-ProjectModalEffects
         $lblLoading.Text=$message
         $loadingOverlay.Visibility='Visible'
         $btnNewProject.IsEnabled=$false
@@ -2420,10 +2423,30 @@ function Confirm-And-InstallUpdate {
     $release=$script:PendingUpdateRelease
     if($null -eq $release){$btnUpdate.Visibility='Collapsed';return}
     $tag=[string]$release.tag_name
-    $nl=[Environment]::NewLine
-    $msg="A atualização $tag está disponível."+$nl+$nl+"Deseja atualizar agora?"+$nl+$nl+"O MT Pack Organizer será fechado e abrirá novamente já atualizado."
-    $ans=[Windows.MessageBox]::Show($msg,'Atualização disponível','YesNo','Information')
-    if($ans -eq 'Yes'){Install-ReleaseUpdate $release}
+    $modal=New-ProjectModal 'Atualização disponível' "Uma nova versão do MT Pack Organizer está pronta para instalar." 495 300
+    $dialog=$modal.Window
+    $version=New-Object Windows.Controls.TextBlock
+    $version.Text="NOVA VERSÃO  $tag";$version.FontSize=15;$version.FontWeight='Bold'
+    $version.Foreground=New-SolidBrush '#DCA1FC';$version.Margin='0,0,0,12'
+    [void]$modal.Content.Children.Add($version)
+    $info=New-Object Windows.Controls.TextBlock
+    $info.Text='Ao confirmar, o aplicativo será fechado e reaberto após a atualização.'
+    $info.TextWrapping='Wrap';$info.FontSize=12;$info.Foreground=New-SolidBrush '#BBB2C2'
+    [void]$modal.Content.Children.Add($info)
+    $cancel=New-ModalButton 'AGORA NÃO'
+    $install=New-ModalButton 'ATUALIZAR AGORA' $true
+    $install.Width=158
+    $cancel.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
+    $install.Add_Click({$dialog.DialogResult=$true}.GetNewClosure())
+    [void]$modal.Footer.Children.Add($cancel)
+    [void]$modal.Footer.Children.Add($install)
+    $dialog.Add_ContentRendered({Save-ModalPreview $dialog 'update'}.GetNewClosure())
+    if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
+        [void]$dialog.Dispatcher.BeginInvoke([Action]{
+            $cancel.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+        }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
+    }
+    if((Show-ProjectModal $dialog) -eq $true){Install-ReleaseUpdate $release}
 }
 
 function Select-PackFolder {
@@ -3356,12 +3379,15 @@ $xamlText = @'
                     <StackPanel><TextBlock Text="SEUS PROJETOS" FontSize="29" FontWeight="Bold"/><TextBlock Text="Organize seus packs e continue exatamente de onde parou." Foreground="#A19AA8" FontSize="13" Margin="0,8,0,0"/></StackPanel>
                     <Button Name="btnNewProject" Grid.Column="1" Content="+  NOVO PROJETO" Height="45" Width="180" Background="#A432DC" BorderBrush="#C070F0" FontWeight="Bold"/>
                 </Grid>
-                <Grid Grid.Row="1" Margin="0,25,0,17"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-                    <Border Background="#1A1120" BorderBrush="#4A265C" BorderThickness="1" Padding="18" CornerRadius="12" Margin="0,0,8,0"><StackPanel><TextBlock Text="PROJETOS SALVOS" Foreground="#B586CE" FontWeight="Bold" FontSize="10"/><TextBlock Name="lblHomeProjects" Text="0" FontSize="29" FontWeight="Bold" Margin="0,5,0,0"/></StackPanel></Border>
-                    <Border Grid.Column="1" Background="#151319" BorderBrush="#333039" BorderThickness="1" Padding="18" CornerRadius="12" Margin="8,0,0,0"><StackPanel><TextBlock Text="CONTINUE SUA ORGANIZAÇÃO" Foreground="#B586CE" FontWeight="Bold" FontSize="10"/><TextBlock Text="Suas decisões ficam salvas automaticamente" Foreground="#FFFFFF" FontSize="14" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
-                </Grid>
+                <Border Grid.Row="1" Background="#17121B" BorderBrush="#392742" BorderThickness="1" CornerRadius="10" Margin="0,22,0,16" Padding="16,11">
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Background="#342039" CornerRadius="7" Padding="11,7" Margin="0,0,12,0"><StackPanel Orientation="Horizontal"><TextBlock Name="lblHomeProjects" Text="0" FontSize="19" FontWeight="Bold" Foreground="#E6B0FF" VerticalAlignment="Center"/><TextBlock Text="  PROJETOS" FontSize="10" FontWeight="Bold" Foreground="#CFA4E3" VerticalAlignment="Center"/></StackPanel></Border>
+                        <Rectangle Grid.Column="1" Width="1" Height="27" Fill="#46374D" Margin="0,0,15,0" VerticalAlignment="Center"/>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="●" Foreground="#A432DC" FontSize="11" Margin="0,0,9,0"/><TextBlock Text="Progresso salvo automaticamente" Foreground="#C6BACB" FontSize="12" FontWeight="SemiBold"/></StackPanel>
+                    </Grid>
+                </Border>
                 <Border Grid.Row="2" Background="#111115" CornerRadius="12" BorderBrush="#2E2933" BorderThickness="1" Padding="17">
-                    <DockPanel><TextBlock DockPanel.Dock="Top" Text="PROJETOS RECENTES" FontSize="12" FontWeight="Bold" Foreground="#D88BFF" Margin="0,0,0,12"/>
+                    <DockPanel><TextBlock DockPanel.Dock="Top" Text="PROJETOS RECENTES" FontSize="13" FontWeight="Bold" Foreground="#D88BFF" Margin="0,0,0,14"/>
                     <TextBlock Name="lblNoProjects" DockPanel.Dock="Top" Text="Nenhum projeto por enquanto. Clique em NOVO PROJETO para começar." Foreground="#A59AA8" FontSize="13" Margin="0,15,0,0" Visibility="Collapsed"/>
                     <ListBox Name="lstRecentProjects" Background="Transparent" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto" ToolTip="Use CONTINUAR para retomar um projeto"/></DockPanel>
                 </Border>
@@ -3392,30 +3418,18 @@ $xamlText = @'
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
             <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="10,7" CornerRadius="10" Background="#19141F" BorderBrush="#543064" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="☀" Foreground="#D88BFF" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="ILUMINAÇÃO" Foreground="#DCC3E8" FontWeight="Bold" FontSize="9" VerticalAlignment="Center" Margin="0,0,9,0"/><Button Name="btnLightDown" Content="−" Width="29" Height="28" Padding="0" FontSize="17"/><Border Background="#261B2C" CornerRadius="5" Width="48" Margin="5,0" Padding="2" VerticalAlignment="Center"><TextBlock Name="lblLightValue" Text="50%" FontSize="11" FontWeight="Bold" TextAlignment="Center" Foreground="#FFFFFF"/></Border><Button Name="btnLightUp" Content="+" Width="29" Height="28" Padding="0" FontSize="16"/></StackPanel></Border>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
-                <Border BorderBrush="#99959C" BorderThickness="1.3" Opacity="0.95"/>
-                <Border Name="transformHoverPlane" Background="#50D4AD64" Visibility="Collapsed" IsHitTestVisible="False" Margin="2"/>
-                <Rectangle Name="rotNW" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-5,-5,0,0" Cursor="SizeNWSE" ToolTip="Redimensionar proporcionalmente"/>
-                <Rectangle Name="rotNE" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0" Cursor="SizeNESW" ToolTip="Redimensionar proporcionalmente"/>
-                <Rectangle Name="rotSW" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-5,0,0,-5" Cursor="SizeNESW" ToolTip="Redimensionar proporcionalmente"/>
-                <Rectangle Name="rotSE" Width="9" Height="9" Fill="#E8D8BD" Stroke="#FFFFFF" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-5,-5" Cursor="SizeNWSE" ToolTip="Redimensionar proporcionalmente"/>
-                <Rectangle Name="rotTop" Width="29" Height="6" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-3,0,0" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
-                <Rectangle Name="rotBottom" Width="29" Height="6" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-3" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
-                <Rectangle Name="rotLeft" Width="6" Height="29" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-3,0,0,0" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
-                <Rectangle Name="rotRight" Width="6" Height="29" RadiusX="2" RadiusY="2" Fill="#D8C5B7" Stroke="#FFFFFF" StrokeThickness="0.6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-3,0" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
-                <Grid Width="144" Height="144" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#01000000">
-                    <Ellipse Name="gizmoRoll" Width="102" Height="102" Stroke="#E8C900" StrokeThickness="2" Opacity="0.34" Cursor="Hand" ToolTip="Girar em torno do eixo Y"/>
-                    <Ellipse Name="gizmoYaw" Width="116" Height="37" Stroke="#E8C900" StrokeThickness="1.8" Opacity="0.30" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
-                    <Ellipse Name="gizmoPitch" Width="37" Height="116" Stroke="#91A3B8" StrokeThickness="1.5" Opacity="0.25" Cursor="Hand" ToolTip="Girar em torno do eixo X"/>
-                    <Line Name="axisY" X1="72" Y1="72" X2="39" Y2="105" Stroke="#5897F5" StrokeThickness="3" Cursor="SizeAll" ToolTip="Mover no eixo Y (profundidade)"/>
-                    <Polygon Name="axisYHead" Points="31,113 38,99 45,106" Fill="#5897F5" Cursor="SizeAll" ToolTip="Mover no eixo Y (profundidade)"/>
-                    <Line Name="axisX" X1="72" Y1="72" X2="128" Y2="72" Stroke="#F05F68" StrokeThickness="4" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
-                    <Polygon Name="axisXHead" Points="128,66 142,72 128,78" Fill="#F05F68" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
-                    <Line Name="axisZ" X1="72" Y1="72" X2="72" Y2="16" Stroke="#55D978" StrokeThickness="4" Cursor="SizeNS" ToolTip="Mover no eixo Z"/>
-                    <Polygon Name="axisZHead" Points="66,16 72,2 78,16" Fill="#55D978" Cursor="SizeNS" ToolTip="Mover no eixo Z"/>
-                    <Ellipse Width="14" Height="14" Fill="#D7DEE8" Stroke="#495260" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Grid>
+                <Border BorderBrush="#A7A3AC" BorderThickness="1" Opacity="0.82" IsHitTestVisible="False"/>
+                <Border Name="transformHoverPlane" Background="#3BDCB26E" Visibility="Collapsed" IsHitTestVisible="False" Margin="1"/>
+                <Rectangle Name="rotNW" Width="8" Height="8" Fill="#DCC3A6" Stroke="#FFF0DD" StrokeThickness="0.8" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-4,-4,0,0" Cursor="Hand" ToolTip="Girar para a esquerda ou direita no plano"/>
+                <Rectangle Name="rotNE" Width="8" Height="8" Fill="#DCC3A6" Stroke="#FFF0DD" StrokeThickness="0.8" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0" Cursor="Hand" ToolTip="Girar para a esquerda ou direita no plano"/>
+                <Rectangle Name="rotSW" Width="8" Height="8" Fill="#DCC3A6" Stroke="#FFF0DD" StrokeThickness="0.8" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-4,0,0,-4" Cursor="Hand" ToolTip="Girar para a esquerda ou direita no plano"/>
+                <Rectangle Name="rotSE" Width="8" Height="8" Fill="#DCC3A6" Stroke="#FFF0DD" StrokeThickness="0.8" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-4,-4" Cursor="Hand" ToolTip="Girar para a esquerda ou direita no plano"/>
+                <Rectangle Name="rotTop" Width="26" Height="5" RadiusX="2" RadiusY="2" Fill="#DCC3A6" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-2,0,0" Cursor="Hand" ToolTip="Inclinar a peça para cima ou para baixo"/>
+                <Rectangle Name="rotBottom" Width="26" Height="5" RadiusX="2" RadiusY="2" Fill="#DCC3A6" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-2" Cursor="Hand" ToolTip="Inclinar a peça para cima ou para baixo"/>
+                <Rectangle Name="rotLeft" Width="5" Height="26" RadiusX="2" RadiusY="2" Fill="#DCC3A6" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-2,0,0,0" Cursor="Hand" ToolTip="Girar a peça para frente ou para trás"/>
+                <Rectangle Name="rotRight" Width="5" Height="26" RadiusX="2" RadiusY="2" Fill="#DCC3A6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-2,0" Cursor="Hand" ToolTip="Girar a peça para frente ou para trás"/>
             </Grid>
-            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Name="lblTransformHint" Text="Clique para selecionar • cantos = escala • setas = mover • anéis = girar • Shift = 5°" Foreground="#A5A1AA" FontSize="9"/></Border>
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Name="lblTransformHint" Text="Arraste para mover • cantos = girar no plano • laterais = girar • Ctrl + rolagem = escala" Foreground="#A5A1AA" FontSize="9"/></Border>
         </Grid></Border>
 
         <Border Grid.Column="4" Background="#111114" CornerRadius="13" BorderBrush="#2D2931" BorderThickness="1" Padding="15"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
@@ -3456,7 +3470,7 @@ try {
 foreach($n in @(
     'btnUpdate','btnHome','btnNewProject','lblHomeProjects','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','gizmoYaw','gizmoPitch','gizmoRoll','axisX','axisXHead','axisY','axisYHead','axisZ','axisZHead','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','rotNW','rotNE','rotSW','rotSE','rotTop','rotBottom','rotLeft','rotRight','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -3484,7 +3498,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.30'
+$script:AppVersion = '0.9.31'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3704,35 +3718,28 @@ function Start-TransformDrag([string]$mode,$e) {
 function Set-TransformHover([string]$mode) {
     if($script:TransformDragMode){$mode=[string]$script:TransformDragMode}
     $script:TransformHoverMode=$mode
-    foreach($ring in @($gizmoYaw,$gizmoPitch,$gizmoRoll)){
-        if($null -eq $ring){continue}
-        $ring.StrokeThickness=1.7
-        $ring.Opacity=if($mode){0.16}else{0.32}
-    }
-    $activeRing=switch($mode){'ROTATE_YAW'{$gizmoYaw};'ROTATE_PITCH'{$gizmoPitch};'ROTATE_ROLL'{$gizmoRoll};default{$null}}
-    if($activeRing){$activeRing.Opacity=1.0;$activeRing.StrokeThickness=3.4}
-    if($transformHoverPlane){$transformHoverPlane.Visibility=if($mode -in @('ROTATE_YAW','ROTATE_PITCH','ROTATE_ROLL','MOVE_Z')){'Visible'}else{'Collapsed'}}
+    if($transformHoverPlane){$transformHoverPlane.Visibility=if($mode -in @('ROTATE_YAW','ROTATE_PITCH','ROTATE_ROLL')){'Visible'}else{'Collapsed'}}
     foreach($handle in @($rotNW,$rotNE,$rotSW,$rotSE,$rotTop,$rotBottom,$rotLeft,$rotRight)){
         if($null -eq $handle){continue}
-        $handle.Fill=New-SolidBrush '#D8C5B7';$handle.Opacity=0.85
+        $handle.Fill=New-SolidBrush '#DCC3A6';$handle.Opacity=0.78
     }
-    foreach($arrow in @($axisX,$axisY,$axisZ)){$arrow.Opacity=0.85;$arrow.StrokeThickness=3}
-    foreach($arrowHead in @($axisXHead,$axisYHead,$axisZHead)){$arrowHead.Opacity=0.85}
-    $activeArrows=switch($mode){'MOVE_X'{@($axisX,$axisXHead)};'MOVE_Y'{@($axisY,$axisYHead)};'MOVE_Z'{@($axisZ,$axisZHead)};default{@()}}
-    foreach($a in @($activeArrows)){
-        if($null -eq $a){continue};$a.Opacity=1
-        if($a -is [Windows.Shapes.Line]){$a.StrokeThickness=5}
+    $activeHandles=switch($mode){
+        'ROTATE_ROLL'{@($rotNW,$rotNE,$rotSW,$rotSE)}
+        'ROTATE_YAW'{@($rotLeft,$rotRight)}
+        'ROTATE_PITCH'{@($rotTop,$rotBottom)}
+        default{@()}
+    }
+    foreach($handle in @($activeHandles)){
+        if($null -eq $handle){continue}
+        $handle.Fill=New-SolidBrush '#FFE0AE';$handle.Opacity=1
     }
     if($lblTransformHint){
         $lblTransformHint.Text=switch($mode){
-            'MOVE_X'{'MOVER NO EIXO X • arraste a seta vermelha'}
-            'MOVE_Y'{'MOVER NO EIXO Y • profundidade (seta azul)'}
-            'MOVE_Z'{'MOVER NO EIXO Z • altura (seta verde)'}
-            'ROTATE_YAW'{'GIRAR NO EIXO Z • Shift = passos de 5°'}
-            'ROTATE_PITCH'{'GIRAR NO EIXO X • Shift = passos de 5°'}
-            'ROTATE_ROLL'{'GIRAR NO EIXO Y • Shift = passos de 5°'}
-            'SCALE'{'REDIMENSIONAR PROPORCIONALMENTE • arraste um canto'}
-            default{'Clique na peça • cantos = escala • setas = mover • anéis = girar • Shift = 5°'}
+            'ROTATE_YAW'{'BARRAS LATERAIS • girar para frente/para trás • Shift = 5°'}
+            'ROTATE_PITCH'{'BARRAS SUPERIOR/INFERIOR • inclinar para cima/baixo • Shift = 5°'}
+            'ROTATE_ROLL'{'CANTOS • rotação horária/anti-horária • Shift = 5°'}
+            'MOVE'{'ARRASTE A ÁREA SELECIONADA • mover livremente'}
+            default{'Arraste para mover • cantos = girar no plano • laterais = girar • Ctrl + rolagem = escala'}
         }
     }
 }
@@ -3740,20 +3747,10 @@ function Set-TransformHover([string]$mode) {
 $transformBox.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE' $e})
 foreach($h in @($rotLeft,$rotRight)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e}) }
 foreach($h in @($rotTop,$rotBottom)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e}) }
-foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'SCALE' $e}) }
-$gizmoYaw.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_YAW' $e})
-$gizmoPitch.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_PITCH' $e})
-$gizmoRoll.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
-foreach($h in @($axisX,$axisXHead)){$h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_X' $e})}
-foreach($h in @($axisY,$axisYHead)){$h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Y' $e})}
-foreach($h in @($axisZ,$axisZHead)){$h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Z' $e})}
-foreach($g in @($gizmoYaw,$rotLeft,$rotRight)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_YAW'})}
-foreach($g in @($gizmoPitch,$rotTop,$rotBottom)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_PITCH'})}
-$gizmoRoll.Add_MouseEnter({Set-TransformHover 'ROTATE_ROLL'})
-foreach($g in @($rotNW,$rotNE,$rotSW,$rotSE)){$g.Add_MouseEnter({Set-TransformHover 'SCALE';$g.Fill=New-SolidBrush '#FFF2D0';$g.Opacity=1})}
-foreach($g in @($axisX,$axisXHead)){$g.Add_MouseEnter({Set-TransformHover 'MOVE_X'})}
-foreach($g in @($axisY,$axisYHead)){$g.Add_MouseEnter({Set-TransformHover 'MOVE_Y'})}
-foreach($g in @($axisZ,$axisZHead)){$g.Add_MouseEnter({Set-TransformHover 'MOVE_Z'})}
+foreach($h in @($rotNW,$rotNE,$rotSW,$rotSE)) { $h.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e}) }
+foreach($g in @($rotLeft,$rotRight)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_YAW'})}
+foreach($g in @($rotTop,$rotBottom)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_PITCH'})}
+foreach($g in @($rotNW,$rotNE,$rotSW,$rotSE)){$g.Add_MouseEnter({Set-TransformHover 'ROTATE_ROLL'})}
 $transformBox.Add_MouseLeave({if(-not $script:TransformDragMode){Set-TransformHover ''}})
 
 
@@ -3845,6 +3842,13 @@ $viewHost.Add_MouseWheel({
     Invoke-Safe {
         if (-not $script:Camera) { return }
         $factor = if($e.Delta -gt 0){0.88}else{1.14}
+        if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Control) -ne 0 -and $script:TransformBoxEnabled){
+            $script:ModelScale=[Math]::Max(0.25,[Math]::Min(3.2,$script:ModelScale/$factor))
+            Update-ModelTransform
+            Save-State
+            $e.Handled=$true
+            return
+        }
         $script:CameraDistance = [Math]::Max(
             $script:BaseCameraDistance*0.42,
             [Math]::Min($script:BaseCameraDistance*4.5,$script:CameraDistance*$factor)
@@ -3884,8 +3888,12 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
     if((Prompt-ProjectName 'Nome inicial') -ne 'Projeto nomeado no teste'){
         throw 'A janela de nome do projeto não confirmou SALVAR.'
     }
+    $script:PendingUpdateRelease=[pscustomobject]@{tag_name='v0.9.99'}
+    Confirm-And-InstallUpdate
+    $script:PendingUpdateRelease=$null
     Set-Loading $true 'ABRINDO PROJETO...'
     if($null -ne $win.Content.Effect){throw 'A tela de carregamento continuou desfocada após o modal.'}
+    if($null -ne $emptyState.Effect -or $null -ne $topHeader.Effect){throw 'O carregamento ainda tem fundo desfocado.'}
     Set-Loading $false
     if($packHeaderInfo.Visibility -ne 'Collapsed'){throw 'O cabeçalho do início não deveria exibir o nome dos projetos.'}
     $fixture=Join-Path ([IO.Path]::GetTempPath()) ('MTPO_UI_TEST_'+[Guid]::NewGuid().ToString('N'))
