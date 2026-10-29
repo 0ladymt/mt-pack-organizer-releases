@@ -2773,11 +2773,11 @@ function Open-Pack {
     Open-PackPath $selectedPath
 }
 
-function Finish-OpeningPack($scan) {
+function Finish-OpeningPack($scan,[bool]$indexReady=$false) {
     $stage='INDEXANDO ARQUIVOS'
     try {
         $lblLoading.Text='INDEXANDO PEÇAS E TEXTURAS...'
-        Build-FileIndex $scan
+        if(-not $indexReady){Build-FileIndex $scan}
         $stage='ATUALIZANDO INTERFACE'
         $lblPackName.Text=[string]$script:ProjectName
         $lblPackPath.Text=[string]$script:PackPath
@@ -2802,6 +2802,58 @@ function Finish-OpeningPack($scan) {
     }
 }
 
+# Indexação cooperativa: um lote curto por tick, permitindo renderização,
+# interação e animações entre os lotes até mesmo com milhares de texturas.
+function Start-AsyncVariantIndex($scan) {
+    if($null -eq $scan -or $null -eq $scan.Models -or $null -eq $scan.Textures){throw 'Resultado de varredura incompleto.'}
+    $script:VariantIndex=@{}
+    $script:Pieces=@($scan.Models | Sort-Object | ForEach-Object {New-Object IO.FileInfo ([string]$_)})
+    if($script:Pieces.Count -eq 0){throw 'Nenhum arquivo YDD foi encontrado nessa pasta.'}
+    $script:AsyncIndexPaths=$scan.Textures
+    $script:AsyncIndexPosition=0
+    $script:AsyncIndexTotal=$scan.Models.Length+$scan.Textures.Length
+    $script:AsyncIndexTimer=New-Object Windows.Threading.DispatcherTimer
+    $script:AsyncIndexTimer.Interval=[TimeSpan]::FromMilliseconds(16)
+    $script:AsyncIndexTimer.Add_Tick({
+        try {
+            $componentSlots='head|berd|hair|uppr|lowr|hand|feet|teef|accs|task|decl|jbib'
+            $propSlots='p_head|p_eyes|p_ears|p_mouth|p_lhand|p_rhand|p_lwrist|p_rwrist|p_hip|p_lfoot|p_rfoot|p_ph_l_hand|p_ph_r_hand'
+            $end=[Math]::Min($script:AsyncIndexPaths.Length,$script:AsyncIndexPosition+45)
+            for($i=$script:AsyncIndexPosition;$i -lt $end;$i++){
+                $f=New-Object IO.FileInfo ([string]$script:AsyncIndexPaths[$i])
+                $name=[string]$f.Name
+                if($name -match "^(?<prefix>.*\^)?(?<slot>$componentSlots)_diff_(?<num>\d+)_(?<letter>[a-z])_(?<kind>uni|whi)\.ytd$"){
+                    $prefix=if($Matches.prefix){[string]$Matches.prefix}else{''}
+                    $kind=[string]$Matches.kind
+                    $key=Get-VariantIndexKey ([string]$f.DirectoryName) $prefix ([string]$Matches.slot) ([int]$Matches.num) $kind
+                    if(-not $script:VariantIndex.ContainsKey($key)){$script:VariantIndex[$key]=New-Object 'System.Collections.Generic.List[object]'}
+                    $script:VariantIndex[$key].Add([pscustomobject]@{Letter=([string]$Matches.letter).ToUpperInvariant();Kind=$kind.ToUpperInvariant();IsRelative=($kind -eq 'whi');File=$f})
+                } elseif($name -match "^(?<prefix>.*\^)?(?<slot>$propSlots)_diff_(?<num>\d+)_(?<letter>[a-z])(?:_(?<kind>uni|whi))?\.ytd$"){
+                    $prefix=if($Matches.prefix){[string]$Matches.prefix}else{''}
+                    $key=Get-VariantIndexKey ([string]$f.DirectoryName) $prefix ([string]$Matches.slot) ([int]$Matches.num) 'prop'
+                    if(-not $script:VariantIndex.ContainsKey($key)){$script:VariantIndex[$key]=New-Object 'System.Collections.Generic.List[object]'}
+                    $script:VariantIndex[$key].Add([pscustomobject]@{Letter=([string]$Matches.letter).ToUpperInvariant();Kind='PROP';IsRelative=$false;File=$f})
+                }
+            }
+            $script:AsyncIndexPosition=$end
+            $done=$script:Pieces.Count+$end
+            Update-LoadingActivity "Indexando $done de $($script:AsyncIndexTotal) arquivos..." $done ([Math]::Max(1,$script:AsyncIndexTotal))
+            if($end -ge $script:AsyncIndexPaths.Length){
+                $script:AsyncIndexTimer.Stop();$script:AsyncIndexTimer=$null
+                $script:AsyncIndexPaths=$null
+                if($script:Index -lt 0 -or $script:Index -ge $script:Pieces.Count){$script:Index=0}
+                Finish-OpeningPack $null $true
+            }
+        } catch {
+            $script:AsyncIndexTimer.Stop();$script:AsyncIndexTimer=$null
+            Write-AppLog ('Indexação em lotes: '+$_.Exception.ToString())
+            Set-Loading $false
+            Show-Error ('Não foi possível indexar o pack: '+$_.Exception.Message)
+        }
+    })
+    $script:AsyncIndexTimer.Start()
+}
+
 function Start-AsyncPackIndex([string]$path) {
     $script:PackScan=[MtPackScan]::Start($path)
     $script:PackScanTimer=New-Object Windows.Threading.DispatcherTimer
@@ -2822,7 +2874,7 @@ function Start-AsyncPackIndex([string]$path) {
             Show-Error ('Não consegui localizar os arquivos do projeto: '+$scan.Error.Message)
             return
         }
-        Finish-OpeningPack $scan
+        Start-AsyncVariantIndex $scan
     })
     $script:PackScanTimer.Start()
 }
@@ -3764,14 +3816,18 @@ $xamlText = @'
     <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#F009080D" Panel.ZIndex="99"><Border Width="510" Padding="30" Background="#17131D" BorderBrush="#654279" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel>
         <TextBlock Text="MT STUDIO  /  PREPARANDO PROJETO" Foreground="#BD8BD9" FontSize="10" FontWeight="Bold"/>
         <Canvas Width="220" Height="116" Margin="0,15,0,0" HorizontalAlignment="Center" ClipToBounds="False">
-            <Image Name="imgLoadingButterflyLeft" Width="76" Height="76" Canvas.Left="32" Canvas.Top="21" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
-                <Image.RenderTransform><RotateTransform Angle="-14"/></Image.RenderTransform>
-                <Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="-23" To="25" Duration="0:0:1.7" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="21" To="5" Duration="0:0:1.35" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)" From="32" To="62" Duration="0:0:2.3" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="Width" From="76" To="39" Duration="0:0:0.18" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers>
-            </Image>
-            <Image Name="imgLoadingButterflyRight" Width="65" Height="65" Canvas.Left="122" Canvas.Top="13" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
-                <Image.RenderTransform><RotateTransform Angle="18"/></Image.RenderTransform>
-                <Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="30" To="-28" Duration="0:0:1.45" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="13" To="36" Duration="0:0:1.85" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)" From="122" To="96" Duration="0:0:2.1" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="Width" From="65" To="34" Duration="0:0:0.2" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers>
-            </Image>
+            <Canvas Width="76" Height="76" Canvas.Left="32" Canvas.Top="21" RenderTransformOrigin="0.5,0.5">
+                <Canvas.RenderTransform><RotateTransform Angle="-14"/></Canvas.RenderTransform>
+                <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="-20" To="17" Duration="0:0:1.7" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="21" To="5" Duration="0:0:1.35" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)" From="32" To="62" Duration="0:0:2.3" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
+                <Image Name="imgWingLeftA" Width="76" Height="76"><Image.Clip><RectangleGeometry Rect="0,0,38,76"/></Image.Clip><Image.RenderTransform><ScaleTransform CenterX="38" ScaleX="1"/></Image.RenderTransform><Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.13" Duration="0:0:0.13" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers></Image>
+                <Image Name="imgWingRightA" Width="76" Height="76"><Image.Clip><RectangleGeometry Rect="38,0,38,76"/></Image.Clip><Image.RenderTransform><ScaleTransform CenterX="38" ScaleX="1"/></Image.RenderTransform><Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.13" Duration="0:0:0.13" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers></Image>
+            </Canvas>
+            <Canvas Width="65" Height="65" Canvas.Left="122" Canvas.Top="13" RenderTransformOrigin="0.5,0.5">
+                <Canvas.RenderTransform><RotateTransform Angle="18"/></Canvas.RenderTransform>
+                <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="22" To="-19" Duration="0:0:1.45" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="13" To="36" Duration="0:0:1.85" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)" From="122" To="96" Duration="0:0:2.1" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
+                <Image Name="imgWingLeftB" Width="65" Height="65"><Image.Clip><RectangleGeometry Rect="0,0,32.5,65"/></Image.Clip><Image.RenderTransform><ScaleTransform CenterX="32.5" ScaleX="1"/></Image.RenderTransform><Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.13" Duration="0:0:0.17" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers></Image>
+                <Image Name="imgWingRightB" Width="65" Height="65"><Image.Clip><RectangleGeometry Rect="32.5,0,32.5,65"/></Image.Clip><Image.RenderTransform><ScaleTransform CenterX="32.5" ScaleX="1"/></Image.RenderTransform><Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.13" Duration="0:0:0.17" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers></Image>
+            </Canvas>
         </Canvas>
         <TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,11"/>
         <ProgressBar Name="loadingProgress" Height="6" Minimum="0" Maximum="100" Value="0" Foreground="#A432DC" Background="#34273C"/>
@@ -3807,7 +3863,7 @@ foreach($n in @(
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','btnNextPending','lblPendingJump','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','btnResetPosition','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
-    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingButterflyLeft','imgLoadingButterflyRight','loadingOverlay','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
+    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgWingLeftA','imgWingRightA','imgWingLeftB','imgWingRightB','loadingOverlay','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
 
 $script:AddonNameSaved = $null
@@ -3835,7 +3891,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.40'
+$script:AppVersion = '0.9.41'
 $script:SupportDiscordUrl = 'https://discord.gg/MAPubH3vRw'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
@@ -3886,8 +3942,8 @@ try {
         $butterflyBitmap=New-Object Windows.Media.Imaging.BitmapImage
         $butterflyBitmap.BeginInit();$butterflyBitmap.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad
         $butterflyBitmap.UriSource=[Uri]::new($butterflyPath,[UriKind]::Absolute);$butterflyBitmap.EndInit();$butterflyBitmap.Freeze()
-        $imgLoadingButterflyLeft.Source=$butterflyBitmap
-        $imgLoadingButterflyRight.Source=$butterflyBitmap
+        $imgWingLeftA.Source=$butterflyBitmap;$imgWingRightA.Source=$butterflyBitmap
+        $imgWingLeftB.Source=$butterflyBitmap;$imgWingRightB.Source=$butterflyBitmap
         $srcIcon=[System.Drawing.Bitmap]::FromFile($butterflyPath)
         $canvas=New-Object System.Drawing.Bitmap 256,256
         $g=[System.Drawing.Graphics]::FromImage($canvas)
