@@ -1039,6 +1039,32 @@ function New-ModalButton([string]$label,[bool]$primary=$false,[bool]$danger=$fal
     return $button
 }
 
+function Show-AppHelp {
+    $modal=New-ProjectModal 'Ajuda e informações' 'MT STUDIO PACK ORGANIZER • orientações e canais oficiais' 570 535
+    $dialog=$modal.Window
+    foreach($section in @(
+        @{Title='COMO COMEÇAR';Body='Clique em NOVO PROJETO para escolher uma pasta com arquivos YDD e YTD. O aplicativo salva suas decisões e a última peça visualizada automaticamente.'},
+        @{Title='REVISÃO RÁPIDA';Body='1 = manter • 2 = excluir • ←/→ = navegar. Use PRÓXIMA PENDENTE para saltar diretamente às peças não revisadas, inclusive após trocar de categoria.'},
+        @{Title='VISUALIZAÇÃO 3D';Body='Arraste para manipular a peça. Passe o mouse nas bordas ou cantos da caixa delimitadora para ativar seus controles. Ctrl + rolagem ajusta a escala.'},
+        @{Title='ARQUIVOS E SEGURANÇA';Body='Marcar EXCLUIR não apaga arquivos. A opção APLICAR EXCLUSÕES move os selecionados para _PARA_EXCLUIR. Confira o resultado antes de distribuir o pack.'},
+        @{Title='SUPORTE E ATUALIZAÇÕES';Body='Instagram: @mt_studiocriativo  •  GitHub: 0ladymt/mt-pack-organizer-releases. Consulte a versão no cabeçalho; novas versões são anunciadas pelo atualizador.'}
+    )){
+        $card=New-Object Windows.Controls.StackPanel
+        $card.Margin='0,0,0,12'
+        $title=New-Object Windows.Controls.TextBlock
+        $title.Text=$section.Title;$title.FontSize=11;$title.FontWeight='Bold';$title.Foreground=New-SolidBrush '#D9A4F1'
+        $description=New-Object Windows.Controls.TextBlock
+        $description.Text=$section.Body;$description.FontSize=11;$description.Foreground=New-SolidBrush '#C5BACD'
+        $description.TextWrapping='Wrap';$description.Margin='0,5,0,0';$description.LineHeight=17
+        [void]$card.Children.Add($title);[void]$card.Children.Add($description)
+        [void]$modal.Content.Children.Add($card)
+    }
+    $close=New-ModalButton 'ENTENDI' $true
+    [void]$modal.Footer.Children.Add($close)
+    $close.Add_Click({$dialog.DialogResult=$true}.GetNewClosure())
+    [void](Show-ProjectModal $dialog)
+}
+
 function Save-ModalPreview([Windows.Window]$dialog,[string]$kind) {
     if($env:MT_PACK_ORGANIZER_UITEST -ne '1' -or -not $env:MT_PACK_ORGANIZER_SCREENSHOT){return}
     if(-not ($emptyState.Effect -is [Windows.Media.Effects.BlurEffect])){
@@ -1365,33 +1391,41 @@ function Build-FileIndex {
     $script:Pieces = @()
     if ([string]::IsNullOrWhiteSpace([string]$script:PackPath)) { return }
 
-    $ydds = @()
+    $ydds = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
+    $scannedPieces=0
     foreach($path in [IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ydd',[IO.SearchOption]::AllDirectories)) {
         if([string]$path -match '\\_PARA_EXCLUIR\\'){ continue }
-        $ydds += (New-Object IO.FileInfo ([string]$path))
+        $ydds.Add((New-Object IO.FileInfo ([string]$path)))
+        $scannedPieces++
+        if($scannedPieces % 150 -eq 0){Update-LoadingActivity "Encontradas $scannedPieces peças 3D..."}
     }
     $script:Pieces = @($ydds | Sort-Object FullName)
     if ($script:Pieces.Count -eq 0) { throw 'Nenhum arquivo YDD foi encontrado nessa pasta.' }
 
     $componentSlots = 'head|berd|hair|uppr|lowr|hand|feet|teef|accs|task|decl|jbib'
     $propSlots = 'p_head|p_eyes|p_ears|p_mouth|p_lhand|p_rhand|p_lwrist|p_rwrist|p_hip|p_lfoot|p_rfoot|p_ph_l_hand|p_ph_r_hand'
+    Update-LoadingActivity "$($script:Pieces.Count) peças localizadas. Procurando texturas..."
+    $scannedTextures=0
     foreach($path in [IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ytd',[IO.SearchOption]::AllDirectories)) {
         if([string]$path -match '\\_PARA_EXCLUIR\\'){ continue }
+        $scannedTextures++
+        if($scannedTextures % 150 -eq 0){Update-LoadingActivity "$($script:Pieces.Count) peças • $scannedTextures texturas localizadas..."}
         $f = New-Object IO.FileInfo ([string]$path)
         $name = [string]$f.Name
         if($name -match "^(?<prefix>.*\^)?(?<slot>$componentSlots)_diff_(?<num>\d+)_(?<letter>[a-z])_(?<kind>uni|whi)\.ytd$") {
             $prefix=if($Matches.prefix){[string]$Matches.prefix}else{''}
             $kind=[string]$Matches.kind
             $key=Get-VariantIndexKey ([string]$f.DirectoryName) $prefix ([string]$Matches.slot) ([int]$Matches.num) $kind
-            if(-not $script:VariantIndex.ContainsKey($key)){$script:VariantIndex[$key]=@()}
-            $script:VariantIndex[$key]=@($script:VariantIndex[$key]) + [pscustomobject]@{Letter=([string]$Matches.letter).ToUpperInvariant();Kind=$kind.ToUpperInvariant();IsRelative=($kind -eq 'whi');File=$f}
+            if(-not $script:VariantIndex.ContainsKey($key)){$script:VariantIndex[$key]=New-Object 'System.Collections.Generic.List[object]'}
+            $script:VariantIndex[$key].Add([pscustomobject]@{Letter=([string]$Matches.letter).ToUpperInvariant();Kind=$kind.ToUpperInvariant();IsRelative=($kind -eq 'whi');File=$f})
         } elseif($name -match "^(?<prefix>.*\^)?(?<slot>$propSlots)_diff_(?<num>\d+)_(?<letter>[a-z])(?:_(?<kind>uni|whi))?\.ytd$") {
             $prefix=if($Matches.prefix){[string]$Matches.prefix}else{''}
             $key=Get-VariantIndexKey ([string]$f.DirectoryName) $prefix ([string]$Matches.slot) ([int]$Matches.num) 'prop'
-            if(-not $script:VariantIndex.ContainsKey($key)){$script:VariantIndex[$key]=@()}
-            $script:VariantIndex[$key]=@($script:VariantIndex[$key]) + [pscustomobject]@{Letter=([string]$Matches.letter).ToUpperInvariant();Kind='PROP';IsRelative=$false;File=$f}
+            if(-not $script:VariantIndex.ContainsKey($key)){$script:VariantIndex[$key]=New-Object 'System.Collections.Generic.List[object]'}
+            $script:VariantIndex[$key].Add([pscustomobject]@{Letter=([string]$Matches.letter).ToUpperInvariant();Kind='PROP';IsRelative=$false;File=$f})
         }
     }
+    Update-LoadingActivity "Índice pronto: $($script:Pieces.Count) peças e $scannedTextures arquivos de textura."
     if ($script:Index -lt 0 -or $script:Index -ge $script:Pieces.Count) { $script:Index = 0 }
 }
 
@@ -2368,6 +2402,24 @@ function Navigate-Piece([int]$delta) {
     Load-CurrentPiece
 }
 
+function Go-NextPendingPiece {
+    if($lblPendingJump){$lblPendingJump.Text=''}
+    $indices=@(Get-FilteredPieceIndices)
+    if($indices.Count -eq 0){return}
+    $position=[array]::IndexOf([int[]]$indices,[int]$script:Index)
+    if($position -lt 0){$position=-1}
+    for($step=1;$step -le $indices.Count;$step++){
+        $target=[int]$indices[($position+$step+$indices.Count)%$indices.Count]
+        $path=$script:Pieces[$target].FullName
+        if(-not $script:Decisions.ContainsKey($path) -or [string]$script:Decisions[$path] -eq 'PENDENTE'){
+            $script:Index=$target
+            Load-CurrentPiece
+            return
+        }
+    }
+    if($lblPendingJump){$lblPendingJump.Text='Todas as peças deste filtro foram revisadas.'}
+}
+
 function Mark-Current([string]$value) {
     if ($script:Pieces.Count -eq 0) { return }
     $p = $script:Pieces[$script:Index].FullName
@@ -2402,6 +2454,7 @@ function Set-Loading([bool]$show,[string]$message='Preparando pack...') {
     if($show){
         Clear-ProjectModalEffects
         $lblLoading.Text=$message
+        if($lblLoadingActivity){$lblLoadingActivity.Text='Preparando os arquivos do projeto...'}
         $loadingOverlay.Visibility='Visible'
         $btnNewProject.IsEnabled=$false
         [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
@@ -2409,6 +2462,12 @@ function Set-Loading([bool]$show,[string]$message='Preparando pack...') {
         $loadingOverlay.Visibility='Collapsed'
         $btnNewProject.IsEnabled=$true
     }
+}
+
+function Update-LoadingActivity([string]$message) {
+    if($null -eq $loadingOverlay -or $loadingOverlay.Visibility -ne 'Visible'){return}
+    if($lblLoadingActivity){$lblLoadingActivity.Text=$message}
+    [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
 }
 
 function Convert-AppVersion([string]$value) {
@@ -3465,7 +3524,7 @@ $xamlText = @'
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
             <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.0.0" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Name="packHeaderInfo" Visibility="Collapsed" Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓  ATUALIZAR" Width="114" Height="38" Margin="0,0,10,0" Padding="9,0" FontSize="11" FontWeight="Bold" Visibility="Collapsed" Background="#291333" BorderBrush="#8642AB" Foreground="#E9C3FF" ToolTip="Nova versão disponível para instalar"/><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Path Width="20" Height="20" Stretch="Uniform" Fill="#D88BFF" Data="M 12,2 L 2,11 L 5,11 L 5,21 L 10,21 L 10,15 L 14,15 L 14,21 L 19,21 L 19,11 L 22,11 Z"/></Button></StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Name="packHeaderInfo" Visibility="Collapsed" Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓  ATUALIZAR" Width="114" Height="38" Margin="0,0,10,0" Padding="9,0" FontSize="11" FontWeight="Bold" Visibility="Collapsed" Background="#291333" BorderBrush="#8642AB" Foreground="#E9C3FF" ToolTip="Nova versão disponível para instalar"/><Button Name="btnHelp" Content="?  AJUDA" Width="91" Height="39" Margin="0,0,10,0" Padding="7,0" FontSize="11" FontWeight="Bold" ToolTip="Como usar, atalhos e canais de suporte"/><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Path Width="20" Height="20" Stretch="Uniform" Fill="#D88BFF" Data="M 12,2 L 2,11 L 5,11 L 5,21 L 10,21 L 10,15 L 14,15 L 14,21 L 19,21 L 19,11 L 22,11 Z"/></Button></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
     </Border>
@@ -3502,7 +3561,7 @@ $xamlText = @'
         <Grid.ColumnDefinitions><ColumnDefinition Width="342"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="#151319" CornerRadius="14" BorderBrush="#342C3A" BorderThickness="1" Padding="17"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <StackPanel><TextBlock Text="PEÇA ATUAL" Foreground="#D6A1EE" FontSize="11" FontWeight="Bold"/><TextBlock Name="lblPieceIndex" Text="0000 / 0000" FontSize="24" FontWeight="Bold" Margin="0,4,0,0"/><TextBlock Name="lblPieceName" Text="-" Margin="0,8,0,0" FontSize="12" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Name="lblPiecePath" Text="-" Visibility="Collapsed"/><TextBlock Name="lblMesh" Foreground="#A49AA9" FontSize="10" Margin="0,6,0,0"/><TextBlock Name="lblDetectedCategory" Foreground="#C994E4" FontSize="10" FontWeight="SemiBold" Margin="0,7,0,0"/><StackPanel Orientation="Horizontal" Margin="0,7,0,0"><Button Name="btnPropYaw" Content="GIRAR ACESSÓRIO ↻" Visibility="Collapsed" Height="28" FontSize="9" Margin="0,0,6,0" ToolTip="Gira o acessório 90 graus sem alterar o arquivo"/><Button Name="btnPropPitch" Content="COLOCAR EM PÉ" Visibility="Collapsed" Height="28" FontSize="9" ToolTip="Alterna a inclinação do acessório"/></StackPanel></StackPanel>
-            <StackPanel Grid.Row="1" Margin="0,14,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnPrev" Content="‹  ANTERIOR" Height="39" Margin="0,0,5,0"/><Button Name="btnNext" Grid.Column="1" Content="PRÓXIMA  ›" Height="39" Margin="5,0,0,0"/></Grid><Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnFirst" Content="INÍCIO" Height="34" FontSize="11" FontWeight="Bold" Margin="0,0,5,0"/><Button Name="btnLast" Grid.Column="1" Content="FIM" Height="34" FontSize="11" FontWeight="Bold" Margin="5,0,0,0"/></Grid></StackPanel>
+            <StackPanel Grid.Row="1" Margin="0,14,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnPrev" Content="‹  ANTERIOR" Height="39" Margin="0,0,5,0"/><Button Name="btnNext" Grid.Column="1" Content="PRÓXIMA  ›" Height="39" Margin="5,0,0,0"/></Grid><Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Button Name="btnFirst" Content="INÍCIO" Height="34" FontSize="11" FontWeight="Bold" Margin="0,0,5,0"/><Button Name="btnLast" Grid.Column="1" Content="FIM" Height="34" FontSize="11" FontWeight="Bold" Margin="5,0,0,0"/></Grid><Button Name="btnNextPending" Content="↳  PRÓXIMA PENDENTE" Height="39" Margin="0,9,0,0" Background="#372143" BorderBrush="#75538C" Foreground="#E8CEF4" ToolTip="Avança direto para a próxima peça sem decisão no filtro atual. Volta ao início se necessário."/><TextBlock Name="lblPendingJump" Text="" Foreground="#BCA3D0" FontSize="10" TextWrapping="Wrap" Margin="1,5,0,0"/></StackPanel>
             <Border Grid.Row="2" Background="#0C0C10" BorderBrush="#29252F" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,11,0,0">
                 <StackPanel>
                     <TextBlock Text="FILTRAR POR CATEGORIA" Foreground="#D6A1EE" FontSize="10" FontWeight="Bold"/>
@@ -3556,7 +3615,7 @@ $xamlText = @'
 
     <Popup Name="texturePreviewPopup" AllowsTransparency="True" StaysOpen="True" IsHitTestVisible="False" Placement="Right" PopupAnimation="None"><Border Width="360" Background="#111114" BorderBrush="#A320FF" BorderThickness="1" CornerRadius="12" Padding="12"><StackPanel><TextBlock Name="lblTexturePreviewName" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Name="lblTexturePreviewMeta" Foreground="#8E8992" FontSize="9" Margin="0,3,0,9"/><Border Width="334" Height="334" Background="#09090B" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="7"><Image Name="imgTexturePreview" Stretch="Uniform" Margin="6"/></Border></StackPanel></Border></Popup>
 
-    <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#E6000000" Panel.ZIndex="99"><Border Width="390" Padding="26" Background="#111114" BorderBrush="#4E255C" BorderThickness="1" CornerRadius="14" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel><Image Name="imgLoadingLogo" Width="175" Height="78" Stretch="Uniform" HorizontalAlignment="Center"/><TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,16,0,10"/><ProgressBar Height="5" IsIndeterminate="True" Foreground="#A320FF" Background="#242429"/><TextBlock Text="O visualizador abre assim que o índice local estiver pronto." Foreground="#8E8992" FontSize="9" HorizontalAlignment="Center" Margin="0,9,0,0"/></StackPanel></Border></Border>
+    <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#F009080D" Panel.ZIndex="99"><Border Width="510" Padding="30" Background="#17131D" BorderBrush="#654279" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel><TextBlock Text="MT STUDIO  /  PREPARANDO PROJETO" Foreground="#BD8BD9" FontSize="10" FontWeight="Bold"/><Image Name="imgLoadingLogo" Width="160" Height="76" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,12,0,0"/><TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,17,0,11"/><ProgressBar Name="loadingProgress" Height="6" IsIndeterminate="True" Foreground="#A432DC" Background="#34273C"/><TextBlock Name="lblLoadingActivity" Text="Preparando os arquivos do projeto..." Foreground="#C5B0D2" FontSize="12" TextAlignment="Center" Margin="0,13,0,0"/><Border Background="#211A29" BorderBrush="#403047" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,20,0,0"><StackPanel><TextBlock Text="ENQUANTO ISSO..." Foreground="#D6A1EE" FontSize="10" FontWeight="Bold"/><TextBlock Text="Suas marcações ficam salvas. Ao retomar um projeto, você volta à última peça vista e pode saltar direto para a próxima pendente." Foreground="#B7ADBF" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel></Border><TextBlock Text="Packs grandes podem levar alguns instantes. A contagem acima mostra os arquivos encontrados." Foreground="#8D8397" FontSize="10" TextAlignment="Center" TextWrapping="Wrap" Margin="0,14,0,0"/></StackPanel></Border></Border>
 
     <Grid Grid.Row="3" Margin="18,0"><TextBlock Text="MT STUDIO  •  ONDE IDEIAS VIRAM IDENTIDADE" Foreground="#867B8A" FontSize="9" VerticalAlignment="Center"/><TextBlock Text="1 manter  •  2 excluir  •  ← → navegar  •  Shift girar 5°  •  Z desfazer  •  R resetar" Foreground="#867B8A" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
 </Grid>
@@ -3581,11 +3640,11 @@ try {
 }
 
 foreach($n in @(
-    'btnUpdate','btnHome','btnNewProject','lblHomeProjects','lblHomeReviewed','lblHomeKeep','lblHomeDelete','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
-    'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
+    'btnUpdate','btnHelp','btnHome','btnNewProject','lblHomeProjects','lblHomeReviewed','lblHomeKeep','lblHomeDelete','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
+    'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','btnNextPending','lblPendingJump','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
-    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
+    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading','lblLoadingActivity','loadingProgress'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
 
 $script:AddonNameSaved = $null
@@ -3613,7 +3672,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.35'
+$script:AppVersion = '0.9.36'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3776,15 +3835,17 @@ $cmbCategory.Add_SelectionChanged({
     if([string]::IsNullOrWhiteSpace($val)){return}
     $script:SelectedCategoryFilter=$val
     $indices=@(Get-FilteredPieceIndices)
-    if($indices.Count -gt 0){
+    if($indices.Count -gt 0 -and $script:Index -notin $indices){
         $script:Index=[int]$indices[0]
-        Load-CurrentPiece
     }
+    if($indices.Count -gt 0){Load-CurrentPiece}
 })
 $chkHideHair.Add_Checked({ if(-not $script:UpdatingPieceOptions -and $script:Pieces.Count -gt 0){$script:HideHairSelections[$script:Pieces[$script:Index].FullName]=$true;Save-State} })
 $chkHideHair.Add_Unchecked({ if(-not $script:UpdatingPieceOptions -and $script:Pieces.Count -gt 0){$script:HideHairSelections[$script:Pieces[$script:Index].FullName]=$false;Save-State} })
 
 $btnNext.Add_Click({ Invoke-Safe { Navigate-Piece 1 } })
+$btnNextPending.Add_Click({ Invoke-Safe { Go-NextPendingPiece } })
+$btnHelp.Add_Click({ Invoke-Safe { Show-AppHelp } })
 $btnFirst.Add_Click({ Invoke-Safe { Go-FirstPiece } })
 $btnLast.Add_Click({ Invoke-Safe { Go-LastPiece } })
 $btnKeep.Add_Click({ Invoke-Safe { Mark-Current 'MANTER' } })
@@ -4098,9 +4159,17 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         Open-PackPath $fixture
         Invoke-TransformGizmoSelfTest
         if($script:Pieces.Count -ne 2){throw 'O projeto de teste não indexou as duas peças.'}
+        Go-NextPendingPiece
+        if($script:Index -ne 1){throw 'O botão PRÓXIMA PENDENTE não encontrou a próxima peça.'}
+        $script:Index=0;Load-CurrentPiece
         Mark-Current 'MANTER'
         if($script:Index -ne 1){throw 'O projeto de teste não navegou após YDD inválida.'}
+        $cmbCategory.SelectedValue='jbib'
+        $cmbCategory.SelectedValue='all'
+        if($script:Index -ne 1){throw 'A troca de categorias perdeu a posição da peça atual.'}
         Mark-Current 'EXCLUIR'
+        Go-NextPendingPiece
+        if($lblPendingJump.Text -notmatch 'revisadas'){throw 'O atalho não avisou quando todas as peças estavam revisadas.'}
         if(-not (Test-Path -LiteralPath (Get-StatePath))){throw 'O projeto de teste não salvou seu estado.'}
         $saved=Get-Content -LiteralPath (Get-StatePath) -Raw | ConvertFrom-Json
         if([int]$saved.index -ne 1){throw 'O projeto de teste não atualizou o índice salvo.'}

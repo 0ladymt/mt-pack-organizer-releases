@@ -1,3 +1,12 @@
+MT Pack Organizer 0.9.36
+
+- Botão PRÓXIMA PENDENTE: encontra a próxima peça sem decisão no filtro de categoria ativo, com retorno circular ao início, sem alterar as marcações existentes; informa quando a categoria está totalmente revisada.
+- Alternar de uma categoria específica para TODAS AS CATEGORIAS não devolve mais a navegação à primeira peça: a seleção atual é preservada sempre que pertence ao filtro.
+- Carregamento reformulado com painel de preparação mais legível, atividade real exibindo contagem de arquivos YDD/YTD encontrados e orientações úteis, sem falsa porcentagem.
+- Indexação otimizada com listas dinâmicas em vez de concatenações crescentes de arrays para peças e variantes, reduzindo custo em packs grandes; atualizações visuais periódicas durante a busca.
+- Botão AJUDA no cabeçalho abre um painel de instruções, atalhos, segurança dos arquivos, suporte MT STUDIO e localização das atualizações.
+- Testes Windows incluem salto à próxima pendente, preservação da posição ao alternar filtros e estado de categoria totalmente revisada.
+
 MT Pack Organizer 0.9.35
 
 - Tela inicial reformulada como painel comercial compacto: hierarquia visual mais clara, botão de criação em destaque e totais de projetos, peças revisadas, mantidas e excluídas.
