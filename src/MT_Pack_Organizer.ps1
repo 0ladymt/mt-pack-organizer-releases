@@ -1416,12 +1416,26 @@ function Build-FileIndex {
     if ([string]::IsNullOrWhiteSpace([string]$script:PackPath)) { return }
 
     $ydds = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
+    $yddPaths = New-Object 'System.Collections.Generic.List[string]'
+    $ytdPaths = New-Object 'System.Collections.Generic.List[string]'
     $scannedPieces=0
     foreach($path in [IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ydd',[IO.SearchOption]::AllDirectories)) {
         if([string]$path -match '\\_PARA_EXCLUIR\\'){ continue }
-        $ydds.Add((New-Object IO.FileInfo ([string]$path)))
+        $yddPaths.Add([string]$path)
         $scannedPieces++
         if($scannedPieces % 150 -eq 0){Update-LoadingActivity "Encontradas $scannedPieces peças 3D..."}
+    }
+    foreach($path in [IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ytd',[IO.SearchOption]::AllDirectories)) {
+        if([string]$path -match '\\_PARA_EXCLUIR\\'){ continue }
+        $ytdPaths.Add([string]$path)
+        if($ytdPaths.Count % 150 -eq 0){Update-LoadingActivity "Localizando arquivos: $scannedPieces peças • $($ytdPaths.Count) texturas..."}
+    }
+    $totalFiles=[Math]::Max(1,$yddPaths.Count+$ytdPaths.Count)
+    $indexedFiles=0
+    foreach($path in $yddPaths){
+        $ydds.Add((New-Object IO.FileInfo $path))
+        $indexedFiles++
+        if($indexedFiles % 100 -eq 0){Update-LoadingActivity "Indexando $indexedFiles de $totalFiles arquivos..." $indexedFiles $totalFiles}
     }
     $script:Pieces = @($ydds | Sort-Object FullName)
     if ($script:Pieces.Count -eq 0) { throw 'Nenhum arquivo YDD foi encontrado nessa pasta.' }
@@ -1430,10 +1444,10 @@ function Build-FileIndex {
     $propSlots = 'p_head|p_eyes|p_ears|p_mouth|p_lhand|p_rhand|p_lwrist|p_rwrist|p_hip|p_lfoot|p_rfoot|p_ph_l_hand|p_ph_r_hand'
     Update-LoadingActivity "$($script:Pieces.Count) peças localizadas. Procurando texturas..."
     $scannedTextures=0
-    foreach($path in [IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ytd',[IO.SearchOption]::AllDirectories)) {
-        if([string]$path -match '\\_PARA_EXCLUIR\\'){ continue }
+    foreach($path in $ytdPaths) {
         $scannedTextures++
-        if($scannedTextures % 150 -eq 0){Update-LoadingActivity "$($script:Pieces.Count) peças • $scannedTextures texturas localizadas..."}
+        $indexedFiles++
+        if($scannedTextures % 100 -eq 0){Update-LoadingActivity "Indexando $indexedFiles de $totalFiles arquivos..." $indexedFiles $totalFiles}
         $f = New-Object IO.FileInfo ([string]$path)
         $name = [string]$f.Name
         if($name -match "^(?<prefix>.*\^)?(?<slot>$componentSlots)_diff_(?<num>\d+)_(?<letter>[a-z])_(?<kind>uni|whi)\.ytd$") {
@@ -1449,7 +1463,7 @@ function Build-FileIndex {
             $script:VariantIndex[$key].Add([pscustomobject]@{Letter=([string]$Matches.letter).ToUpperInvariant();Kind='PROP';IsRelative=$false;File=$f})
         }
     }
-    Update-LoadingActivity "Índice pronto: $($script:Pieces.Count) peças e $scannedTextures arquivos de textura."
+    Update-LoadingActivity "Índice pronto: $($script:Pieces.Count) peças e $scannedTextures texturas." $totalFiles $totalFiles
     if ($script:Index -lt 0 -or $script:Index -ge $script:Pieces.Count) { $script:Index = 0 }
 }
 
@@ -1798,6 +1812,9 @@ function Invoke-TransformGizmoSelfTest {
         $script:Yaw=0;$script:Pitch=0;$script:Roll=0
         $script:ModelOffsetX=0;$script:ModelOffsetY=0;$script:ModelOffsetZ=0
         Update-ModelTransform
+        # O teste deve calibrar a caixa para a câmera sintética, sem herdar
+        # dimensões da peça que o fixture acabou de abrir.
+        Set-TransformBox $false
         Set-TransformBox $true
         $width=[double]$transformBox.Width;$height=[double]$transformBox.Height
         if($width -lt 30 -or $height -lt 30){throw 'Caixa de seleção 3D não foi projetada.'}
@@ -2466,6 +2483,8 @@ function Set-Loading([bool]$show,[string]$message='Preparando pack...') {
         Clear-ProjectModalEffects
         $lblLoading.Text=$message
         if($lblLoadingActivity){$lblLoadingActivity.Text='Preparando os arquivos do projeto...'}
+        if($loadingProgress){$loadingProgress.Value=0}
+        if($lblLoadingPercent){$lblLoadingPercent.Text='LOCALIZANDO ARQUIVOS'}
         $loadingOverlay.Visibility='Visible'
         $btnNewProject.IsEnabled=$false
         [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
@@ -2475,9 +2494,14 @@ function Set-Loading([bool]$show,[string]$message='Preparando pack...') {
     }
 }
 
-function Update-LoadingActivity([string]$message) {
+function Update-LoadingActivity([string]$message,[int]$completed=-1,[int]$total=0) {
     if($null -eq $loadingOverlay -or $loadingOverlay.Visibility -ne 'Visible'){return}
     if($lblLoadingActivity){$lblLoadingActivity.Text=$message}
+    if($completed -ge 0 -and $total -gt 0){
+        $percent=[Math]::Min(100,[Math]::Max(0,[int][Math]::Floor(100.0*$completed/$total)))
+        if($loadingProgress){$loadingProgress.Value=$percent}
+        if($lblLoadingPercent){$lblLoadingPercent.Text="$percent%  •  $completed / $total arquivos"}
+    }
     [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
 }
 
@@ -3588,7 +3612,10 @@ $xamlText = @'
 
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
             <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
-            <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14" Padding="10,7" CornerRadius="10" Background="#19141F" BorderBrush="#543064" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="☀" Foreground="#D88BFF" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="ILUMINAÇÃO" Foreground="#DCC3E8" FontWeight="Bold" FontSize="9" VerticalAlignment="Center" Margin="0,0,9,0"/><Button Name="btnLightDown" Content="−" Width="29" Height="28" Padding="0" FontSize="17"/><Border Background="#261B2C" CornerRadius="5" Width="48" Margin="5,0" Padding="2" VerticalAlignment="Center"><TextBlock Name="lblLightValue" Text="50%" FontSize="11" FontWeight="Bold" TextAlignment="Center" Foreground="#FFFFFF"/></Border><Button Name="btnLightUp" Content="+" Width="29" Height="28" Padding="0" FontSize="16"/></StackPanel></Border>
+            <StackPanel VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14">
+                <Border Padding="10,7" CornerRadius="10" Background="#19141F" BorderBrush="#543064" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="☀" Foreground="#D88BFF" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="ILUMINAÇÃO" Foreground="#DCC3E8" FontWeight="Bold" FontSize="9" VerticalAlignment="Center" Margin="0,0,9,0"/><Button Name="btnLightDown" Content="−" Width="29" Height="28" Padding="0" FontSize="17"/><Border Background="#261B2C" CornerRadius="5" Width="48" Margin="5,0" Padding="2" VerticalAlignment="Center"><TextBlock Name="lblLightValue" Text="50%" FontSize="11" FontWeight="Bold" TextAlignment="Center" Foreground="#FFFFFF"/></Border><Button Name="btnLightUp" Content="+" Width="29" Height="28" Padding="0" FontSize="16"/></StackPanel></Border>
+                <Button Name="btnResetPosition" Content="↺  RESTAURAR POSIÇÃO PADRÃO" Height="33" FontSize="10" FontWeight="SemiBold" Margin="0,8,0,0" Background="#201827" Foreground="#DBBCEB" BorderBrush="#664477" ToolTip="Restaura a rotação, o tamanho e a posição original da peça no visualizador 3D."/>
+            </StackPanel>
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
                 <Border BorderBrush="#8E8A93" BorderThickness="0.85" Opacity="0.78" IsHitTestVisible="False"/>
                 <!-- Os destaques são desenhados sob demanda: nenhum puxador permanente. -->
@@ -3626,7 +3653,24 @@ $xamlText = @'
 
     <Popup Name="texturePreviewPopup" AllowsTransparency="True" StaysOpen="True" IsHitTestVisible="False" Placement="Right" PopupAnimation="None"><Border Width="360" Background="#111114" BorderBrush="#A320FF" BorderThickness="1" CornerRadius="12" Padding="12"><StackPanel><TextBlock Name="lblTexturePreviewName" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Name="lblTexturePreviewMeta" Foreground="#8E8992" FontSize="9" Margin="0,3,0,9"/><Border Width="334" Height="334" Background="#09090B" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="7"><Image Name="imgTexturePreview" Stretch="Uniform" Margin="6"/></Border></StackPanel></Border></Popup>
 
-    <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#F009080D" Panel.ZIndex="99"><Border Width="510" Padding="30" Background="#17131D" BorderBrush="#654279" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel><TextBlock Text="MT STUDIO  /  PREPARANDO PROJETO" Foreground="#BD8BD9" FontSize="10" FontWeight="Bold"/><Image Name="imgLoadingLogo" Width="160" Height="76" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,12,0,0"/><TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,17,0,11"/><ProgressBar Name="loadingProgress" Height="6" IsIndeterminate="True" Foreground="#A432DC" Background="#34273C"/><TextBlock Name="lblLoadingActivity" Text="Preparando os arquivos do projeto..." Foreground="#C5B0D2" FontSize="12" TextAlignment="Center" Margin="0,13,0,0"/><Border Background="#211A29" BorderBrush="#403047" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,20,0,0"><StackPanel><TextBlock Text="ENQUANTO ISSO..." Foreground="#D6A1EE" FontSize="10" FontWeight="Bold"/><TextBlock Text="Suas marcações ficam salvas. Ao retomar um projeto, você volta à última peça vista e pode saltar direto para a próxima pendente." Foreground="#B7ADBF" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel></Border><TextBlock Text="Packs grandes podem levar alguns instantes. A contagem acima mostra os arquivos encontrados." Foreground="#8D8397" FontSize="10" TextAlignment="Center" TextWrapping="Wrap" Margin="0,14,0,0"/></StackPanel></Border></Border>
+    <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#F009080D" Panel.ZIndex="99"><Border Width="510" Padding="30" Background="#17131D" BorderBrush="#654279" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel>
+        <TextBlock Text="MT STUDIO  /  PREPARANDO PROJETO" Foreground="#BD8BD9" FontSize="10" FontWeight="Bold"/>
+        <Canvas Width="220" Height="116" Margin="0,15,0,0" HorizontalAlignment="Center" ClipToBounds="False">
+            <Image Name="imgLoadingButterflyLeft" Width="76" Height="76" Canvas.Left="32" Canvas.Top="21" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
+                <Image.RenderTransform><RotateTransform Angle="-14"/></Image.RenderTransform>
+                <Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="-23" To="25" Duration="0:0:1.7" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="21" To="5" Duration="0:0:1.35" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers>
+            </Image>
+            <Image Name="imgLoadingButterflyRight" Width="65" Height="65" Canvas.Left="122" Canvas.Top="13" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
+                <Image.RenderTransform><RotateTransform Angle="18"/></Image.RenderTransform>
+                <Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="30" To="-28" Duration="0:0:1.45" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="13" To="36" Duration="0:0:1.85" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers>
+            </Image>
+        </Canvas>
+        <TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,11"/>
+        <ProgressBar Name="loadingProgress" Height="6" Minimum="0" Maximum="100" Value="0" Foreground="#A432DC" Background="#34273C"/>
+        <TextBlock Name="lblLoadingPercent" Text="LOCALIZANDO ARQUIVOS" Foreground="#DAB6ED" FontWeight="SemiBold" FontSize="11" TextAlignment="Center" Margin="0,11,0,0"/>
+        <TextBlock Name="lblLoadingActivity" Text="Preparando os arquivos do projeto..." Foreground="#C5B0D2" FontSize="12" TextAlignment="Center" Margin="0,8,0,0"/>
+        <TextBlock Text="O progresso acompanha a indexação real de cada arquivo. A busca inicial identifica o total do pack." Foreground="#8D8397" FontSize="10" TextAlignment="Center" TextWrapping="Wrap" Margin="0,14,0,0"/>
+    </StackPanel></Border></Border>
 
     <Grid Grid.Row="3" Margin="18,0"><TextBlock Text="MT STUDIO  •  ONDE IDEIAS VIRAM IDENTIDADE" Foreground="#867B8A" FontSize="9" VerticalAlignment="Center"/><TextBlock Text="1 manter  •  2 excluir  •  ← → navegar  •  Shift girar 5°  •  Z desfazer  •  R resetar" Foreground="#867B8A" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
 </Grid>
@@ -3653,9 +3697,9 @@ try {
 foreach($n in @(
     'btnUpdate','btnHelp','btnHome','btnNewProject','lblHomeProjects','lblHomeReviewed','lblHomeKeep','lblHomeDelete','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','btnNextPending','lblPendingJump','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','btnResetPosition','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
-    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading','lblLoadingActivity','loadingProgress'
+    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingButterflyLeft','imgLoadingButterflyRight','loadingOverlay','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
 
 $script:AddonNameSaved = $null
@@ -3683,7 +3727,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.38'
+$script:AppVersion = '0.9.39'
 $script:SupportDiscordUrl = 'https://discord.gg/MAPubH3vRw'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
@@ -3727,10 +3771,15 @@ try {
         $bi=New-Object Windows.Media.Imaging.BitmapImage
         $bi.BeginInit();$bi.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad
         $bi.UriSource=[Uri]::new($logoPath,[UriKind]::Absolute);$bi.EndInit();$bi.Freeze()
-        $imgBrandLogo.Source=$bi;$imgEmptyLogo.Source=$bi;$imgLoadingLogo.Source=$bi
+        $imgBrandLogo.Source=$bi;$imgEmptyLogo.Source=$bi
     }
     Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
     if(Test-Path $butterflyPath){
+        $butterflyBitmap=New-Object Windows.Media.Imaging.BitmapImage
+        $butterflyBitmap.BeginInit();$butterflyBitmap.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $butterflyBitmap.UriSource=[Uri]::new($butterflyPath,[UriKind]::Absolute);$butterflyBitmap.EndInit();$butterflyBitmap.Freeze()
+        $imgLoadingButterflyLeft.Source=$butterflyBitmap
+        $imgLoadingButterflyRight.Source=$butterflyBitmap
         $srcIcon=[System.Drawing.Bitmap]::FromFile($butterflyPath)
         $canvas=New-Object System.Drawing.Bitmap 256,256
         $g=[System.Drawing.Graphics]::FromImage($canvas)
@@ -3818,6 +3867,7 @@ $btnNewProject.Add_Click({ Invoke-Safe { Open-Pack } })
 $btnHome.Add_Click({ Invoke-Safe { Go-Home } })
 $btnLightDown.Add_Click({ Invoke-Safe { Change-Light -15 } })
 $btnLightUp.Add_Click({ Invoke-Safe { Change-Light 15 } })
+$btnResetPosition.Add_Click({ Invoke-Safe { if($script:PackPath -and $script:Pieces.Count -gt 0){Reset-View} } })
 $lstRecentProjects.Add_MouseDoubleClick({
     if($lstRecentProjects.SelectedItem){
         $path=[string]$lstRecentProjects.SelectedItem.Tag
