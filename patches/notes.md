@@ -1,3 +1,10 @@
+MT Pack Organizer 0.9.34
+
+- Removido inteiramente o retângulo roxo grande do interior da caixa delimitadora.
+- A região vazia da seleção não ativa mais a movimentação no eixo Z; somente a seta verde do manipulador central faz esse movimento.
+- Mantidos os três eixos centrais, a moldura cinza fina e as faixas/quadrados roxo-claros de rotação que aparecem no hover.
+- Testes confirmam a ausência de destaque central e a separação entre a região vazia e a seta Z.
+
 MT Pack Organizer 0.9.33
 
 - Manipulador central 3D restaurado com setas nos eixos X (vermelho), Y (azul/profundidade) e Z (verde/altura), cada uma com hover e arraste específicos.
