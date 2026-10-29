@@ -2533,10 +2533,12 @@ function Set-Loading([bool]$show,[string]$message='Preparando pack...') {
         if($loadingProgress){$loadingProgress.Value=0}
         if($lblLoadingPercent){$lblLoadingPercent.Text='LOCALIZANDO ARQUIVOS'}
         $loadingOverlay.Visibility='Visible'
+        if($script:ButterflyFrameTimer){$script:ButterflyFrameTimer.Start()}
         $btnNewProject.IsEnabled=$false
         [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
     } else {
         $loadingOverlay.Visibility='Collapsed'
+        if($script:ButterflyFrameTimer){$script:ButterflyFrameTimer.Stop()}
         $btnNewProject.IsEnabled=$true
     }
 }
@@ -3823,7 +3825,6 @@ $xamlText = @'
                     <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="5"/><SplineDoubleKeyFrame KeyTime="0:0:3" Value="55" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="14" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="5" KeySpline="0.38,0,0.62,1"/></DoubleAnimationUsingKeyFrames>
                     <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="31"/><SplineDoubleKeyFrame KeyTime="0:0:3" Value="8"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="49"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="31"/></DoubleAnimationUsingKeyFrames>
                     <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="-8"/><LinearDoubleKeyFrame KeyTime="0:0:3" Value="12"/><LinearDoubleKeyFrame KeyTime="0:0:6" Value="-10"/><LinearDoubleKeyFrame KeyTime="0:0:9" Value="-8"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)" From="1" To="0.78" Duration="0:0:0.34" AutoReverse="True"/>
                 </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
                 <Image Name="imgLoadingButterflyLeft" Width="100" Height="90" Stretch="Uniform"/>
             </Canvas>
@@ -3833,7 +3834,6 @@ $xamlText = @'
                     <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="191"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="151" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="193" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:11" Value="191" KeySpline="0.38,0,0.62,1"/></DoubleAnimationUsingKeyFrames>
                     <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="30"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="58"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="12"/><SplineDoubleKeyFrame KeyTime="0:0:11" Value="30"/></DoubleAnimationUsingKeyFrames>
                     <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="11"/><LinearDoubleKeyFrame KeyTime="0:0:4" Value="-13"/><LinearDoubleKeyFrame KeyTime="0:0:7" Value="9"/><LinearDoubleKeyFrame KeyTime="0:0:11" Value="11"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)" From="1" To="0.81" Duration="0:0:0.39" AutoReverse="True"/>
                 </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
                 <Image Name="imgLoadingButterflyRight" Width="80" Height="76" Stretch="Uniform"/>
             </Canvas>
@@ -3900,7 +3900,10 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.43'
+$script:AppVersion = '0.9.44'
+$script:ButterflyFrameTimer=$null
+$script:ButterflyFrameIndex=0
+$script:ButterflyFrames=@()
 $script:SupportDiscordUrl = 'https://discord.gg/MAPubH3vRw'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
@@ -3953,6 +3956,29 @@ try {
         $butterflyBitmap.UriSource=[Uri]::new($butterflyPath,[UriKind]::Absolute);$butterflyBitmap.EndInit();$butterflyBitmap.Freeze()
         $imgLoadingButterflyLeft.Source=$butterflyBitmap
         $imgLoadingButterflyRight.Source=$butterflyBitmap
+        $flightSheetPath=Join-Path $PSScriptRoot 'assets\mt_butterfly_flight_sheet.png'
+        if(Test-Path $flightSheetPath){
+            $flightSheet=New-Object Windows.Media.Imaging.BitmapImage
+            $flightSheet.BeginInit();$flightSheet.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+            $flightSheet.UriSource=[Uri]::new($flightSheetPath,[UriKind]::Absolute)
+            $flightSheet.EndInit();$flightSheet.Freeze()
+            if($flightSheet.PixelWidth -ne 1024 -or $flightSheet.PixelHeight -ne 512){throw 'Quadros da borboleta com dimensões inválidas.'}
+            for($frame=0;$frame -lt 32;$frame++){
+                $rect=[Windows.Int32Rect]::new([int](($frame % 8) * 128),[int]([Math]::Floor($frame / 8) * 128),128,128)
+                $crop=[Windows.Media.Imaging.CroppedBitmap]::new($flightSheet,$rect)
+                $crop.Freeze()
+                $script:ButterflyFrames+=,$crop
+            }
+            $imgLoadingButterflyLeft.Source=$script:ButterflyFrames[0]
+            $imgLoadingButterflyRight.Source=$script:ButterflyFrames[10]
+            $script:ButterflyFrameTimer=New-Object Windows.Threading.DispatcherTimer
+            $script:ButterflyFrameTimer.Interval=[TimeSpan]::FromMilliseconds(65)
+            $script:ButterflyFrameTimer.Add_Tick({
+                $script:ButterflyFrameIndex=($script:ButterflyFrameIndex+1) % 32
+                $imgLoadingButterflyLeft.Source=$script:ButterflyFrames[$script:ButterflyFrameIndex]
+                $imgLoadingButterflyRight.Source=$script:ButterflyFrames[(($script:ButterflyFrameIndex+10) % 32)]
+            })
+        }
         $srcIcon=[System.Drawing.Bitmap]::FromFile($butterflyPath)
         $canvas=New-Object System.Drawing.Bitmap 256,256
         $g=[System.Drawing.Graphics]::FromImage($canvas)
