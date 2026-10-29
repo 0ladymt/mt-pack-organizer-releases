@@ -3699,7 +3699,7 @@ $xamlText = @'
             </Grid>
             <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="cbBorder" Property="Background" Value="#101015"/><Setter TargetName="cbBorder" Property="BorderBrush" Value="#6E3A82"/></Trigger>
-                <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="cbBorder" Property="BorderBrush" Value="#A320FF"/></Trigger>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="cbBorder" Property="BorderBrush" Value="#A432DC"/></Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate></Setter.Value></Setter>
     </Style>
@@ -3718,7 +3718,7 @@ $xamlText = @'
     <Border Name="topHeader" Grid.Row="1" Background="#080809" BorderBrush="#19171D" BorderThickness="0,0,0,1">
         <Grid Margin="22,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Width="154" Height="76" Background="Transparent" Margin="0,0,20,0" VerticalAlignment="Center"><Image Name="imgBrandLogo" Width="150" Height="74" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/></Border>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.0.0" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A320FF" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><TextBlock Text="PACK ORGANIZER" FontSize="22" FontWeight="Bold"/><Border Background="#211229" BorderBrush="#5B286B" BorderThickness="1" CornerRadius="9" Padding="7,2" Margin="10,3,0,0" VerticalAlignment="Top"><TextBlock Name="lblVersion" Text="v0.0.0" Foreground="#D88BFF" FontSize="8" FontWeight="Bold"/></Border></StackPanel><TextBlock Text="VISUALIZE • ORGANIZE • GERE O ADD-ON" Foreground="#8E8992" FontSize="9" Margin="0,5,0,0"/><Rectangle Width="64" Height="3" Fill="#A432DC" HorizontalAlignment="Left" Margin="0,9,0,0"/></StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><StackPanel Name="packHeaderInfo" Visibility="Collapsed" Margin="0,0,15,0" MaxWidth="360"><TextBlock Name="lblPackName" Text="" FontWeight="SemiBold" HorizontalAlignment="Right"/><TextBlock Name="lblPackPath" Text="" Foreground="#68646D" FontSize="9" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"/></StackPanel><Button Name="btnUpdate" Content="↓  ATUALIZAR" Width="114" Height="38" Margin="0,0,10,0" Padding="9,0" FontSize="11" FontWeight="Bold" Visibility="Collapsed" Background="#291333" BorderBrush="#8642AB" Foreground="#E9C3FF" ToolTip="Nova versão disponível para instalar"/><Button Name="btnHelp" Content="AJUDA" Width="85" Height="39" Margin="0,0,10,0" Padding="7,0" FontSize="11" FontWeight="Bold" ToolTip="Como usar e atalhos do aplicativo"/><Button Name="btnHome" Width="43" Height="42" Margin="0,0,8,0" Padding="0" Visibility="Collapsed" ToolTip="Voltar para meus projetos"><Canvas Width="22" Height="22"><Polygon Points="1,10 11,1 21,10" Fill="#D88BFF"/><Rectangle Canvas.Left="4" Canvas.Top="9" Width="14" Height="12" Fill="#D88BFF"/><Rectangle Canvas.Left="9" Canvas.Top="14" Width="5" Height="7" Fill="#211D28"/></Canvas></Button></StackPanel>
             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Top"><Button Name="btnWinMin" Content="—" Width="34" Height="28" Padding="0" FontSize="13"/><Button Name="btnWinMax" Content="□" Width="34" Height="28" Padding="0" FontSize="12" Margin="4,0,0,0"/><Button Name="btnWinClose" Content="×" Width="34" Height="28" Padding="0" FontSize="16" Margin="4,0,0,0" Background="#251519" BorderBrush="#6E2D3B"/></StackPanel>
         </Grid>
@@ -3771,7 +3771,7 @@ $xamlText = @'
         </Grid></Border>
 
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
-            <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A320FF" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
+            <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="14" Padding="9,5" CornerRadius="7" Background="#D0141417"><StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#A432DC" Margin="0,0,7,0"/><TextBlock Text="3D REAL • LOCAL" FontSize="9" FontWeight="Bold"/></StackPanel></Border>
             <StackPanel VerticalAlignment="Top" HorizontalAlignment="Right" Margin="14">
                 <Border Padding="10,7" CornerRadius="10" Background="#19141F" BorderBrush="#543064" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="☀" Foreground="#D88BFF" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="ILUMINAÇÃO" Foreground="#DCC3E8" FontWeight="Bold" FontSize="9" VerticalAlignment="Center" Margin="0,0,9,0"/><Button Name="btnLightDown" Content="−" Width="29" Height="28" Padding="0" FontSize="17"/><Border Background="#261B2C" CornerRadius="5" Width="48" Margin="5,0" Padding="2" VerticalAlignment="Center"><TextBlock Name="lblLightValue" Text="50%" FontSize="11" FontWeight="Bold" TextAlignment="Center" Foreground="#FFFFFF"/></Border><Button Name="btnLightUp" Content="+" Width="29" Height="28" Padding="0" FontSize="16"/></StackPanel></Border>
                 <Button Name="btnResetPosition" Content="↺  RESTAURAR POSIÇÃO PADRÃO" Height="33" FontSize="10" FontWeight="SemiBold" Margin="0,8,0,0" Background="#201827" Foreground="#DBBCEB" BorderBrush="#664477" ToolTip="Restaura a rotação, o tamanho e a posição original da peça no visualizador 3D."/>
@@ -3811,33 +3811,31 @@ $xamlText = @'
         </StackPanel></ScrollViewer></Border>
     </Grid>
 
-    <Popup Name="texturePreviewPopup" AllowsTransparency="True" StaysOpen="True" IsHitTestVisible="False" Placement="Right" PopupAnimation="None"><Border Width="360" Background="#111114" BorderBrush="#A320FF" BorderThickness="1" CornerRadius="12" Padding="12"><StackPanel><TextBlock Name="lblTexturePreviewName" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Name="lblTexturePreviewMeta" Foreground="#8E8992" FontSize="9" Margin="0,3,0,9"/><Border Width="334" Height="334" Background="#09090B" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="7"><Image Name="imgTexturePreview" Stretch="Uniform" Margin="6"/></Border></StackPanel></Border></Popup>
+    <Popup Name="texturePreviewPopup" AllowsTransparency="True" StaysOpen="True" IsHitTestVisible="False" Placement="Right" PopupAnimation="None"><Border Width="360" Background="#111114" BorderBrush="#A432DC" BorderThickness="1" CornerRadius="12" Padding="12"><StackPanel><TextBlock Name="lblTexturePreviewName" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/><TextBlock Name="lblTexturePreviewMeta" Foreground="#8E8992" FontSize="9" Margin="0,3,0,9"/><Border Width="334" Height="334" Background="#09090B" BorderBrush="#2D2931" BorderThickness="1" CornerRadius="7"><Image Name="imgTexturePreview" Stretch="Uniform" Margin="6"/></Border></StackPanel></Border></Popup>
 
     <Border Grid.Row="2" Name="loadingOverlay" Visibility="Collapsed" Background="#F009080D" Panel.ZIndex="99"><Border Width="510" Padding="30" Background="#17131D" BorderBrush="#654279" BorderThickness="1" CornerRadius="17" HorizontalAlignment="Center" VerticalAlignment="Center"><StackPanel>
         <TextBlock Text="MT STUDIO  /  PREPARANDO PROJETO" Foreground="#BD8BD9" FontSize="10" FontWeight="Bold"/>
-        <Canvas Width="280" Height="150" Margin="0,10,0,0" HorizontalAlignment="Center" ClipToBounds="True">
-            <!-- Borboletas vetoriais: asas independentes, sem PNG nem artefatos embaixo. -->
-            <Canvas Width="92" Height="90" Canvas.Left="17" Canvas.Top="45" RenderTransformOrigin="0.5,0.5">
-                <Canvas.RenderTransform><RotateTransform Angle="-10"/></Canvas.RenderTransform>
+        <Canvas Width="280" Height="150" Margin="0,10,0,0" HorizontalAlignment="Center" ClipToBounds="True" Name="butterflyFlightStage">
+            <!-- A imagem aprovada pela MT preserva a silhueta; trajetórias independentes sem sobreposição. -->
+            <Canvas Width="100" Height="90" Canvas.Left="5" Canvas.Top="31" RenderTransformOrigin="0.5,0.5">
+                <Canvas.RenderTransform><TransformGroup><ScaleTransform ScaleX="1" ScaleY="1"/><RotateTransform Angle="-8"/></TransformGroup></Canvas.RenderTransform>
                 <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="17"/><SplineDoubleKeyFrame KeyTime="0:0:2" Value="153" KeySpline="0.32,0.1,0.58,0.9"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="190" KeySpline="0.42,0,0.58,1"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="48" KeySpline="0.42,0,0.58,1"/><SplineDoubleKeyFrame KeyTime="0:0:8" Value="17" KeySpline="0.35,0,0.65,1"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="45"/><SplineDoubleKeyFrame KeyTime="0:0:2" Value="8"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="60"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="13"/><SplineDoubleKeyFrame KeyTime="0:0:8" Value="45"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="-16"/><LinearDoubleKeyFrame KeyTime="0:0:2" Value="23"/><LinearDoubleKeyFrame KeyTime="0:0:4" Value="-18"/><LinearDoubleKeyFrame KeyTime="0:0:6" Value="12"/><LinearDoubleKeyFrame KeyTime="0:0:8" Value="-16"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="5"/><SplineDoubleKeyFrame KeyTime="0:0:3" Value="55" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="14" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="5" KeySpline="0.38,0,0.62,1"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="31"/><SplineDoubleKeyFrame KeyTime="0:0:3" Value="8"/><SplineDoubleKeyFrame KeyTime="0:0:6" Value="49"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="31"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="-8"/><LinearDoubleKeyFrame KeyTime="0:0:3" Value="12"/><LinearDoubleKeyFrame KeyTime="0:0:6" Value="-10"/><LinearDoubleKeyFrame KeyTime="0:0:9" Value="-8"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)" From="1" To="0.78" Duration="0:0:0.34" AutoReverse="True"/>
                 </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
-                <Path Fill="#B84AF1" Stroke="#E3A0FF" StrokeThickness="0.7" Data="M 45,42 C 29,3 2,8 8,29 C 12,40 24,43 40,47 C 14,47 15,80 33,75 C 43,70 44,54 46,47 Z"><Path.RenderTransform><ScaleTransform CenterX="46" ScaleX="1"/></Path.RenderTransform><Path.Triggers><EventTrigger RoutedEvent="Path.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.38" Duration="0:0:0.19" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Path.Triggers></Path>
-                <Path Fill="#B84AF1" Stroke="#E3A0FF" StrokeThickness="0.7" Data="M 47,42 C 63,3 90,8 84,29 C 80,40 68,43 52,47 C 78,47 77,80 59,75 C 49,70 48,54 46,47 Z"><Path.RenderTransform><ScaleTransform CenterX="46" ScaleX="1"/></Path.RenderTransform><Path.Triggers><EventTrigger RoutedEvent="Path.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.38" Duration="0:0:0.19" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Path.Triggers></Path>
-                <Ellipse Canvas.Left="43" Canvas.Top="32" Width="6" Height="33" Fill="#F0BDFF"/>
+                <Image Name="imgLoadingButterflyLeft" Width="100" Height="90" Stretch="Uniform"/>
             </Canvas>
-            <Canvas Width="78" Height="77" Canvas.Left="196" Canvas.Top="34" RenderTransformOrigin="0.5,0.5">
-                <Canvas.RenderTransform><RotateTransform Angle="14"/></Canvas.RenderTransform>
+            <Canvas Width="80" Height="76" Canvas.Left="191" Canvas.Top="30" RenderTransformOrigin="0.5,0.5">
+                <Canvas.RenderTransform><TransformGroup><ScaleTransform ScaleX="1" ScaleY="1"/><RotateTransform Angle="11"/></TransformGroup></Canvas.RenderTransform>
                 <Canvas.Triggers><EventTrigger RoutedEvent="Canvas.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="196"/><SplineDoubleKeyFrame KeyTime="0:0:2.4" Value="38"/><SplineDoubleKeyFrame KeyTime="0:0:4.6" Value="115"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="225"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="196"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="34"/><SplineDoubleKeyFrame KeyTime="0:0:2.4" Value="66"/><SplineDoubleKeyFrame KeyTime="0:0:4.6" Value="5"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="58"/><SplineDoubleKeyFrame KeyTime="0:0:9" Value="34"/></DoubleAnimationUsingKeyFrames>
-                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="15"/><LinearDoubleKeyFrame KeyTime="0:0:2.4" Value="-24"/><LinearDoubleKeyFrame KeyTime="0:0:4.6" Value="19"/><LinearDoubleKeyFrame KeyTime="0:0:7" Value="-12"/><LinearDoubleKeyFrame KeyTime="0:0:9" Value="15"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Left)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="191"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="151" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="193" KeySpline="0.38,0,0.62,1"/><SplineDoubleKeyFrame KeyTime="0:0:11" Value="191" KeySpline="0.38,0,0.62,1"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(Canvas.Top)"><SplineDoubleKeyFrame KeyTime="0:0:0" Value="30"/><SplineDoubleKeyFrame KeyTime="0:0:4" Value="58"/><SplineDoubleKeyFrame KeyTime="0:0:7" Value="12"/><SplineDoubleKeyFrame KeyTime="0:0:11" Value="30"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"><LinearDoubleKeyFrame KeyTime="0:0:0" Value="11"/><LinearDoubleKeyFrame KeyTime="0:0:4" Value="-13"/><LinearDoubleKeyFrame KeyTime="0:0:7" Value="9"/><LinearDoubleKeyFrame KeyTime="0:0:11" Value="11"/></DoubleAnimationUsingKeyFrames>
+                    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)" From="1" To="0.81" Duration="0:0:0.39" AutoReverse="True"/>
                 </Storyboard></BeginStoryboard></EventTrigger></Canvas.Triggers>
-                <Path Fill="#9B36DB" Stroke="#E3A0FF" StrokeThickness="0.8" Data="M 38,35 C 23,2 2,7 7,25 C 11,37 19,39 34,40 C 13,42 13,68 28,65 C 37,61 39,45 39,39 Z"><Path.RenderTransform><ScaleTransform CenterX="39" ScaleX="1"/></Path.RenderTransform><Path.Triggers><EventTrigger RoutedEvent="Path.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.34" Duration="0:0:0.24" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Path.Triggers></Path>
-                <Path Fill="#9B36DB" Stroke="#E3A0FF" StrokeThickness="0.8" Data="M 40,35 C 55,2 76,7 71,25 C 67,37 59,39 44,40 C 65,42 65,68 50,65 C 41,61 39,45 39,39 Z"><Path.RenderTransform><ScaleTransform CenterX="39" ScaleX="1"/></Path.RenderTransform><Path.Triggers><EventTrigger RoutedEvent="Path.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="0.34" Duration="0:0:0.24" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Path.Triggers></Path>
-                <Ellipse Canvas.Left="36.5" Canvas.Top="28" Width="5" Height="28" Fill="#EBC1FF"/>
+                <Image Name="imgLoadingButterflyRight" Width="80" Height="76" Stretch="Uniform"/>
             </Canvas>
         </Canvas>
         <TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,11"/>
@@ -3874,7 +3872,7 @@ foreach($n in @(
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','btnNextPending','lblPendingJump','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects',
     'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','btnResetPosition','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
-    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','loadingOverlay','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
+    'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','loadingOverlay','imgLoadingButterflyLeft','imgLoadingButterflyRight','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
 
 $script:AddonNameSaved = $null
@@ -3902,7 +3900,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.42'
+$script:AppVersion = '0.9.43'
 $script:SupportDiscordUrl = 'https://discord.gg/MAPubH3vRw'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
@@ -3953,6 +3951,8 @@ try {
         $butterflyBitmap=New-Object Windows.Media.Imaging.BitmapImage
         $butterflyBitmap.BeginInit();$butterflyBitmap.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad
         $butterflyBitmap.UriSource=[Uri]::new($butterflyPath,[UriKind]::Absolute);$butterflyBitmap.EndInit();$butterflyBitmap.Freeze()
+        $imgLoadingButterflyLeft.Source=$butterflyBitmap
+        $imgLoadingButterflyRight.Source=$butterflyBitmap
         $srcIcon=[System.Drawing.Bitmap]::FromFile($butterflyPath)
         $canvas=New-Object System.Drawing.Bitmap 256,256
         $g=[System.Drawing.Graphics]::FromImage($canvas)
@@ -3964,7 +3964,7 @@ try {
         $path.AddArc($x,$y,$diam,$diam,180,90);$path.AddArc($x+$w-$diam,$y,$diam,$diam,270,90)
         $path.AddArc($x+$w-$diam,$y+$h-$diam,$diam,$diam,0,90);$path.AddArc($x,$y+$h-$diam,$diam,$diam,90,90);$path.CloseFigure()
         $bg=New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255,12,10,16))
-        $pen=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255,163,32,255)),5
+        $pen=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255,164,50,220)),5
         $g.FillPath($bg,$path);$g.DrawPath($pen,$path)
         $scale=[Math]::Min(180.0/$srcIcon.Width,180.0/$srcIcon.Height)
         $dw=[int]($srcIcon.Width*$scale);$dh=[int]($srcIcon.Height*$scale)
