@@ -30,6 +30,46 @@ public static class MtTextureLighting {
 }
 '@
 
+# A busca de arquivos ocorre fora da thread WPF. A janela continua animando
+# mesmo durante a varredura de packs muito grandes ou discos lentos.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
+public sealed class MtPackScan {
+    public volatile int FoundModels;
+    public volatile int FoundTextures;
+    public volatile bool IsDone;
+    public Exception Error;
+    public string[] Models;
+    public string[] Textures;
+    public static MtPackScan Start(string root) {
+        var state = new MtPackScan();
+        Task.Run(() => {
+            try {
+                var models = new List<string>();
+                var textures = new List<string>();
+                foreach (string path in Directory.EnumerateFiles(root, "*.ydd", SearchOption.AllDirectories)) {
+                    if (path.IndexOf(Path.DirectorySeparatorChar + "_PARA_EXCLUIR" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    models.Add(path);
+                    state.FoundModels = models.Count;
+                }
+                foreach (string path in Directory.EnumerateFiles(root, "*.ytd", SearchOption.AllDirectories)) {
+                    if (path.IndexOf(Path.DirectorySeparatorChar + "_PARA_EXCLUIR" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    textures.Add(path);
+                    state.FoundTextures = textures.Count;
+                }
+                state.Models = models.ToArray();
+                state.Textures = textures.ToArray();
+            } catch (Exception error) { state.Error = error; }
+            finally { state.IsDone = true; }
+        });
+        return state;
+    }
+}
+'@
+
 $ErrorActionPreference = 'Stop'
 # Evita duas janelas de trabalho quando o usuário clica no atalho novamente.
 $script:InstanceMutex=$null
@@ -1409,7 +1449,7 @@ function Ensure-RuntimeCollections {
     if($null -eq $script:ThumbGeneration){$script:ThumbGeneration=0}
 }
 
-function Build-FileIndex {
+function Build-FileIndex($scan=$null) {
     Ensure-RuntimeCollections
     $script:VariantIndex = @{}
     $script:Pieces = @()
@@ -1419,13 +1459,15 @@ function Build-FileIndex {
     $yddPaths = New-Object 'System.Collections.Generic.List[string]'
     $ytdPaths = New-Object 'System.Collections.Generic.List[string]'
     $scannedPieces=0
-    foreach($path in [IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ydd',[IO.SearchOption]::AllDirectories)) {
+    $modelPaths=if($null -ne $scan){$scan.Models}else{[IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ydd',[IO.SearchOption]::AllDirectories)}
+    foreach($path in $modelPaths) {
         if([string]$path -match '\\_PARA_EXCLUIR\\'){ continue }
         $yddPaths.Add([string]$path)
         $scannedPieces++
         if($scannedPieces % 150 -eq 0){Update-LoadingActivity "Encontradas $scannedPieces peças 3D..."}
     }
-    foreach($path in [IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ytd',[IO.SearchOption]::AllDirectories)) {
+    $texturePaths=if($null -ne $scan){$scan.Textures}else{[IO.Directory]::EnumerateFiles([string]$script:PackPath,'*.ytd',[IO.SearchOption]::AllDirectories)}
+    foreach($path in $texturePaths) {
         if([string]$path -match '\\_PARA_EXCLUIR\\'){ continue }
         $ytdPaths.Add([string]$path)
         if($ytdPaths.Count % 150 -eq 0){Update-LoadingActivity "Localizando arquivos: $scannedPieces peças • $($ytdPaths.Count) texturas..."}
@@ -2726,12 +2768,68 @@ function Open-Pack {
     Open-PackPath $selectedPath
 }
 
+function Finish-OpeningPack($scan) {
+    $stage='INDEXANDO ARQUIVOS'
+    try {
+        $lblLoading.Text='INDEXANDO PEÇAS E TEXTURAS...'
+        Build-FileIndex $scan
+        $stage='ATUALIZANDO INTERFACE'
+        $lblPackName.Text=[string]$script:ProjectName
+        $lblPackPath.Text=[string]$script:PackPath
+        $packHeaderInfo.Visibility='Visible'
+        if($script:AddonNameSaved){$txtAddonName.Text=Convert-ToAddonName ([string]$script:AddonNameSaved)}else{$txtAddonName.Text=Get-DefaultAddonName}
+        $emptyState.Visibility='Collapsed'
+        $mainContent.Visibility='Visible'
+        $btnHome.Visibility='Visible'
+        $stage='ABRINDO PRIMEIRA PEÇA'
+        $lblLoading.Text='PREPARANDO VISUALIZAÇÃO 3D...'
+        Load-CurrentPiece
+        Remember-Project $script:PackPath
+        Refresh-RecentProjects
+        if($loadingProgress){$loadingProgress.Value=100}
+        if($lblLoadingPercent){$lblLoadingPercent.Text='PROJETO PRONTO'}
+    } catch {
+        Write-AppLog ("Finish-OpeningPack [$stage]: " + $_.Exception.ToString())
+        $mainContent.Visibility='Collapsed';$emptyState.Visibility='Visible'
+        Show-Error ("Não consegui abrir este pack.`n`nEtapa: $stage`n`n"+$_.Exception.Message)
+    } finally {
+        Set-Loading $false
+    }
+}
+
+function Start-AsyncPackIndex([string]$path) {
+    $script:PackScan=[MtPackScan]::Start($path)
+    $script:PackScanTimer=New-Object Windows.Threading.DispatcherTimer
+    $script:PackScanTimer.Interval=[TimeSpan]::FromMilliseconds(90)
+    $script:PackScanTimer.Add_Tick({
+        $scan=$script:PackScan
+        if($null -eq $scan){return}
+        if(-not $scan.IsDone){
+            if($lblLoadingActivity){$lblLoadingActivity.Text="Localizando $($scan.FoundModels) peças e $($scan.FoundTextures) texturas..."}
+            return
+        }
+        $script:PackScanTimer.Stop()
+        $script:PackScanTimer=$null
+        $script:PackScan=$null
+        if($scan.Error){
+            Write-AppLog ('Busca em segundo plano: '+$scan.Error.ToString())
+            Set-Loading $false
+            Show-Error ('Não consegui localizar os arquivos do projeto: '+$scan.Error.Message)
+            return
+        }
+        Finish-OpeningPack $scan
+    })
+    $script:PackScanTimer.Start()
+}
+
 function Open-PackPath([string]$selectedPath) {
     if(-not (Test-Path -LiteralPath $selectedPath -PathType Container)){
         Show-Error 'A pasta deste projeto não existe mais.';Refresh-RecentProjects;return
     }
 
+    if($script:PackScanTimer -and $script:PackScanTimer.IsEnabled){return}
     $stage='INICIALIZAÇÃO'
+    $deferred=$false
     Set-Loading $true 'INDEXANDO O PACK...'
     try {
         Ensure-RuntimeCollections
@@ -2767,6 +2865,11 @@ function Open-PackPath([string]$selectedPath) {
         $stage='INDEXANDO ARQUIVOS'
         $lblLoading.Text='LOCALIZANDO PEÇAS E TEXTURAS...'
         [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+        if($env:MT_PACK_ORGANIZER_UITEST -ne '1'){
+            Start-AsyncPackIndex $selectedPath
+            $deferred=$true
+            return
+        }
         Build-FileIndex
 
         $stage='ATUALIZANDO INTERFACE'
@@ -2791,7 +2894,7 @@ function Open-PackPath([string]$selectedPath) {
         $mainContent.Visibility='Collapsed'; $emptyState.Visibility='Visible'
         Show-Error ("Não consegui abrir este pack.`n`nEtapa: $stage`nLinha: $line`n`n"+$_.Exception.Message+"`n`nO erro completo foi salvo em logs.")
     } finally {
-        Set-Loading $false
+        if(-not $deferred){Set-Loading $false}
     }
 }
 
@@ -3658,11 +3761,11 @@ $xamlText = @'
         <Canvas Width="220" Height="116" Margin="0,15,0,0" HorizontalAlignment="Center" ClipToBounds="False">
             <Image Name="imgLoadingButterflyLeft" Width="76" Height="76" Canvas.Left="32" Canvas.Top="21" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
                 <Image.RenderTransform><RotateTransform Angle="-14"/></Image.RenderTransform>
-                <Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="-23" To="25" Duration="0:0:1.7" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="21" To="5" Duration="0:0:1.35" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers>
+                <Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="-23" To="25" Duration="0:0:1.7" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="21" To="5" Duration="0:0:1.35" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)" From="32" To="62" Duration="0:0:2.3" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="Width" From="76" To="39" Duration="0:0:0.18" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers>
             </Image>
             <Image Name="imgLoadingButterflyRight" Width="65" Height="65" Canvas.Left="122" Canvas.Top="13" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
                 <Image.RenderTransform><RotateTransform Angle="18"/></Image.RenderTransform>
-                <Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="30" To="-28" Duration="0:0:1.45" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="13" To="36" Duration="0:0:1.85" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers>
+                <Image.Triggers><EventTrigger RoutedEvent="Image.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever"><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="30" To="-28" Duration="0:0:1.45" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Top)" From="13" To="36" Duration="0:0:1.85" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)" From="122" To="96" Duration="0:0:2.1" AutoReverse="True"/><DoubleAnimation Storyboard.TargetProperty="Width" From="65" To="34" Duration="0:0:0.2" AutoReverse="True"/></Storyboard></BeginStoryboard></EventTrigger></Image.Triggers>
             </Image>
         </Canvas>
         <TextBlock Name="lblLoading" Text="INDEXANDO O PACK..." FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,11"/>
@@ -3727,7 +3830,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.39'
+$script:AppVersion = '0.9.40'
 $script:SupportDiscordUrl = 'https://discord.gg/MAPubH3vRw'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
