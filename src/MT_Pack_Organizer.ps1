@@ -1749,7 +1749,19 @@ function Invoke-TransformGizmoSelfTest {
         if($hoverTop.Visibility -ne 'Visible' -or $hoverBottom.Visibility -ne 'Visible' -or $hoverLeft.Visibility -ne 'Collapsed'){
             throw 'As faixas horizontais não substituíram as verticais.'
         }
+        Set-TransformHover 'MOVE_X'
+        if($centerAxisX.StrokeThickness -lt 4.5 -or $centerAxisY.StrokeThickness -ge 4.5){
+            throw 'Manipulador central: seta X não foi destacada individualmente.'
+        }
+        Set-TransformHover 'MOVE_Y'
+        if($centerAxisY.StrokeThickness -lt 4.5 -or $centerAxisZ.StrokeThickness -ge 4.5){
+            throw 'Manipulador central: seta Y não foi destacada individualmente.'
+        }
         Set-TransformHover 'MOVE_Z'
+        if($centerAxisZ.StrokeThickness -lt 4.5){throw 'Manipulador central: seta Z não recebeu o hover.'}
+        if($transformHoverPlane.Margin.Left -lt 30 -or $transformHoverPlane.Margin.Top -lt 25){
+            throw 'Plano central não foi reduzido em relação à moldura.'
+        }
         Save-TransformGizmoPreview 'centro'
         if($transformHoverPlane.Visibility -ne 'Visible' -or $hoverTop.Visibility -ne 'Collapsed'){
             throw 'O plano central não foi isolado das bordas.'
@@ -3466,15 +3478,26 @@ $xamlText = @'
             <Grid Name="transformBox" Width="330" Height="440" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Background="#01000000">
                 <Border BorderBrush="#8E8A93" BorderThickness="0.85" Opacity="0.78" IsHitTestVisible="False"/>
                 <!-- Os destaques são desenhados sob demanda: nenhum puxador permanente. -->
-                <Border Name="transformHoverPlane" Background="#36E3B76A" Visibility="Collapsed" IsHitTestVisible="False" Margin="3"/>
-                <Rectangle Name="hoverLeft" Width="16" Fill="#68F1C87D" HorizontalAlignment="Left" Margin="3,29,0,29" Visibility="Collapsed" IsHitTestVisible="False"/>
-                <Rectangle Name="hoverRight" Width="16" Fill="#68F1C87D" HorizontalAlignment="Right" Margin="0,29,3,29" Visibility="Collapsed" IsHitTestVisible="False"/>
-                <Rectangle Name="hoverTop" Height="16" Fill="#68F1C87D" VerticalAlignment="Top" Margin="29,3,29,0" Visibility="Collapsed" IsHitTestVisible="False"/>
-                <Rectangle Name="hoverBottom" Height="16" Fill="#68F1C87D" VerticalAlignment="Bottom" Margin="29,0,29,3" Visibility="Collapsed" IsHitTestVisible="False"/>
-                <Rectangle Name="hoverNW" Width="28" Height="28" Fill="#8DF1C87D" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,2,0,0" Visibility="Collapsed" IsHitTestVisible="False"/>
-                <Rectangle Name="hoverNE" Width="28" Height="28" Fill="#8DF1C87D" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,2,0" Visibility="Collapsed" IsHitTestVisible="False"/>
-                <Rectangle Name="hoverSW" Width="28" Height="28" Fill="#8DF1C87D" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="2,0,0,2" Visibility="Collapsed" IsHitTestVisible="False"/>
-                <Rectangle Name="hoverSE" Width="28" Height="28" Fill="#8DF1C87D" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Border Name="transformHoverPlane" Background="#32D5A0F5" Visibility="Collapsed" IsHitTestVisible="False" Margin="34,29"/>
+                <Rectangle Name="hoverLeft" Width="16" Fill="#70D5A0F5" HorizontalAlignment="Left" Margin="3,29,0,29" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverRight" Width="16" Fill="#70D5A0F5" HorizontalAlignment="Right" Margin="0,29,3,29" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverTop" Height="16" Fill="#70D5A0F5" VerticalAlignment="Top" Margin="29,3,29,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverBottom" Height="16" Fill="#70D5A0F5" VerticalAlignment="Bottom" Margin="29,0,29,3" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverNW" Width="28" Height="28" Fill="#9AD5A0F5" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,2,0,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverNE" Width="28" Height="28" Fill="#9AD5A0F5" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,2,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverSW" Width="28" Height="28" Fill="#9AD5A0F5" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="2,0,0,2" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Rectangle Name="hoverSE" Width="28" Height="28" Fill="#9AD5A0F5" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <!-- Manipulador central independente: X vermelho, Y azul e Z verde, como no Photoshop 3D. -->
+                <Canvas Name="centerAxisWidget" Width="120" Height="120" HorizontalAlignment="Center" VerticalAlignment="Center" Background="Transparent">
+                    <Ellipse Name="centerRotateRing" Width="86" Height="86" Canvas.Left="17" Canvas.Top="17" Stroke="#E5C938" StrokeThickness="2" Visibility="Collapsed" Cursor="Hand" ToolTip="Girar em torno do eixo Z"/>
+                    <Line Name="centerAxisY" X1="60" Y1="60" X2="34" Y2="86" Stroke="#69A4FF" StrokeThickness="3.4" Cursor="SizeAll" ToolTip="Mover no eixo Y (profundidade)"/>
+                    <Polygon Name="centerTipY" Points="28,92 33,78 42,87" Fill="#69A4FF" Cursor="SizeAll" ToolTip="Mover no eixo Y (profundidade)"/>
+                    <Line Name="centerAxisX" X1="60" Y1="60" X2="101" Y2="60" Stroke="#F46D80" StrokeThickness="3.4" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
+                    <Polygon Name="centerTipX" Points="101,54 114,60 101,66" Fill="#F46D80" Cursor="SizeWE" ToolTip="Mover no eixo X"/>
+                    <Line Name="centerAxisZ" X1="60" Y1="60" X2="60" Y2="19" Stroke="#64DD8A" StrokeThickness="3.4" Cursor="SizeNS" ToolTip="Mover no eixo Z"/>
+                    <Polygon Name="centerTipZ" Points="54,19 60,6 66,19" Fill="#64DD8A" Cursor="SizeNS" ToolTip="Mover no eixo Z"/>
+                    <Ellipse Width="13" Height="13" Canvas.Left="53.5" Canvas.Top="53.5" Fill="#DDE4F0" Stroke="#6D7280" StrokeThickness="1.3"/>
+                </Canvas>
             </Grid>
             <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="11,6" CornerRadius="8" Background="#D0141417"><TextBlock Name="lblTransformHint" Text="Selecione a peça • aproxime o mouse de uma borda ou canto • Ctrl + rolagem = escala" Foreground="#A5A1AA" FontSize="9"/></Border>
         </Grid></Border>
@@ -3517,7 +3540,7 @@ try {
 foreach($n in @(
     'btnUpdate','btnHome','btnNewProject','lblHomeProjects','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects','btnPropYaw','btnPropPitch',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','lblLightValue','transformBox','transformHoverPlane','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgLoadingLogo','loadingOverlay','lblLoading'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -3545,7 +3568,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.32'
+$script:AppVersion = '0.9.33'
 try {
     $lblVersion.Text="v$($script:AppVersion)"
     $win.Title="MT Studio • Pack Organizer $($script:AppVersion)"
@@ -3792,6 +3815,22 @@ function Set-TransformHover([string]$mode) {
         default{@()}
     }
     foreach($h in @($active)){if($null -ne $h){$h.Visibility='Visible'}}
+    foreach($axis in @($centerAxisX,$centerAxisY,$centerAxisZ)){
+        $axis.StrokeThickness=3.4;$axis.Opacity=0.86
+    }
+    foreach($tip in @($centerTipX,$centerTipY,$centerTipZ)){$tip.Opacity=0.86}
+    $activeAxis=switch($mode){
+        'MOVE_X'{@($centerAxisX,$centerTipX)}
+        'MOVE_Y'{@($centerAxisY,$centerTipY)}
+        'MOVE_Z'{@($centerAxisZ,$centerTipZ)}
+        default{@()}
+    }
+    foreach($axis in @($activeAxis)){
+        if($null -eq $axis){continue}
+        $axis.Opacity=1.0
+        if($axis -is [Windows.Shapes.Line]){$axis.StrokeThickness=5}
+    }
+    $centerRotateRing.Visibility=if($mode -eq 'ROTATE_ROLL'){'Visible'}else{'Collapsed'}
     $transformBox.Cursor=if($mode -eq 'ROTATE_ROLL'){'Hand'}elseif($mode -eq 'ROTATE_YAW'){'SizeWE'}elseif($mode -eq 'ROTATE_PITCH'){'SizeNS'}elseif($mode -eq 'MOVE_Z'){'SizeAll'}else{'Arrow'}
     if($lblTransformHint){
         $lblTransformHint.Text=switch($mode){
@@ -3799,6 +3838,8 @@ function Set-TransformHover([string]$mode) {
             'ROTATE_PITCH'{'GIRAR EM TORNO DO EIXO X • arraste a faixa horizontal • Shift = 5°'}
             'ROTATE_ROLL'{'GIRAR EM TORNO DO EIXO Z • arraste o canto • Shift = 5°'}
             'MOVE_Z'{'MOVER NO EIXO Z • arraste o plano • Alt + arrastar = mover livremente'}
+            'MOVE_X'{'MOVER NO EIXO X • arraste a seta vermelha'}
+            'MOVE_Y'{'MOVER NO EIXO Y • arraste a seta azul (profundidade)'}
             'MOVE'{'MOVER LIVREMENTE • arraste a seleção'}
             default{'Selecione a peça • aproxime o mouse de uma borda ou canto • Ctrl + rolagem = escala'}
         }
@@ -3808,18 +3849,51 @@ function Set-TransformHover([string]$mode) {
 $transformBox.Add_MouseMove({
     param($s,$e)
     if($script:TransformDragMode){return}
+    if($centerAxisWidget.IsMouseOver){return}
     $p=$e.GetPosition($transformBox)
     $mode=Get-TransformHoverMode $p.X $p.Y $transformBox.ActualWidth $transformBox.ActualHeight
     Set-TransformHover $mode
 })
 $transformBox.Add_MouseLeftButtonDown({
     param($s,$e)
+    if($centerAxisWidget.IsMouseOver){return}
     $p=$e.GetPosition($transformBox)
     $mode=Get-TransformHoverMode $p.X $p.Y $transformBox.ActualWidth $transformBox.ActualHeight
     if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Alt) -ne 0){$mode='MOVE'}
     if($mode){Start-TransformDrag $mode $e}
 })
 $transformBox.Add_MouseLeave({if(-not $script:TransformDragMode){Set-TransformHover ''}})
+foreach($a in @($centerAxisX,$centerTipX)){
+    $a.Add_MouseEnter({Set-TransformHover 'MOVE_X'})
+    $a.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_X' $e})
+}
+foreach($a in @($centerAxisY,$centerTipY)){
+    $a.Add_MouseEnter({Set-TransformHover 'MOVE_Y'})
+    $a.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Y' $e})
+}
+foreach($a in @($centerAxisZ,$centerTipZ)){
+    $a.Add_MouseEnter({Set-TransformHover 'MOVE_Z'})
+    $a.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Z' $e})
+}
+$centerAxisWidget.Add_MouseEnter({if(-not $script:TransformDragMode){Set-TransformHover 'MOVE_Z'}})
+$centerAxisWidget.Add_MouseMove({
+    param($s,$e)
+    if($script:TransformDragMode){return}
+    $source=$e.OriginalSource
+    $mode=if($source -eq $centerAxisX -or $source -eq $centerTipX){'MOVE_X'}
+        elseif($source -eq $centerAxisY -or $source -eq $centerTipY){'MOVE_Y'}
+        elseif($source -eq $centerRotateRing){'ROTATE_ROLL'}
+        else{'MOVE_Z'}
+    Set-TransformHover $mode
+})
+$centerAxisWidget.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'MOVE_Z' $e})
+$centerRotateRing.Add_MouseLeftButtonDown({param($s,$e) Start-TransformDrag 'ROTATE_ROLL' $e})
+$centerAxisWidget.Add_MouseLeave({
+    if(-not $script:TransformDragMode){
+        $p=[Windows.Input.Mouse]::GetPosition($transformBox)
+        Set-TransformHover (Get-TransformHoverMode $p.X $p.Y $transformBox.ActualWidth $transformBox.ActualHeight)
+    }
+})
 
 
 $viewHost.Add_MouseLeftButtonDown({
