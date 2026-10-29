@@ -1066,12 +1066,13 @@ function Show-AppHelp {
     $support.Background=New-SolidBrush '#30203D'
     $support.BorderBrush=New-SolidBrush '#75518E'
     $support.ToolTip='Abrir o servidor oficial MT STUDIO no Discord'
-    $support.IsEnabled=(-not [string]::IsNullOrWhiteSpace([string]$script:SupportDiscordUrl))
+    $supportUrl=[string]$script:SupportDiscordUrl
+    $support.IsEnabled=(-not [string]::IsNullOrWhiteSpace($supportUrl))
     $support.Add_Click({
-        if([string]$script:SupportDiscordUrl -match '^https://(discord\.gg/|discord\.com/invite/)'){
-            Start-Process -FilePath $script:SupportDiscordUrl
+        if($supportUrl -match '^https://(discord\.gg/|discord\.com/invite/)'){
+            Start-Process -FilePath $supportUrl
         }
-    })
+    }.GetNewClosure())
     $spacer=New-Object Windows.Controls.Border;$spacer.Width=236
     $close=New-ModalButton 'ENTENDI' $true
     [void]$modal.Footer.Children.Add($support)
@@ -1081,7 +1082,7 @@ function Show-AppHelp {
     if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         [void]$dialog.Dispatcher.BeginInvoke([Action]{
             if(-not $support.IsEnabled){throw 'O botão SUPORTE deveria estar ativo com o convite oficial.'}
-            if([string]$script:SupportDiscordUrl -ne 'https://discord.gg/MAPubH3vRw'){throw 'Convite Discord incorreto no suporte.'}
+            if($supportUrl -ne 'https://discord.gg/MAPubH3vRw'){throw 'Convite Discord incorreto no suporte.'}
             $close.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
         }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
     }
