@@ -4535,6 +4535,29 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         [void](New-Item -ItemType Directory -Path $fixture -Force)
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_000_u.ydd'),[byte[]](1,2,3,4))
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_001_u.ydd'),[byte[]](1,2,3,4))
+        # Integração real: executa o gerador fora do processo WPF e verifica
+        # que a tarefa respondeu, criou o resource e não deixou a UI presa.
+        $textureFixture=Join-Path $fixture 'jbib_diff_000_a_uni.ytd'
+        [IO.File]::WriteAllBytes($textureFixture,[byte[]](1,2,3,4))
+        $addonFixture=Join-Path $fixture 'saida_teste'
+        $testPiece=[pscustomobject]@{
+            Ydd=(Get-Item -LiteralPath (Join-Path $fixture 'jbib_000_u.ydd'))
+            Slot='jbib';TypeNumeric=8;IsProp=$false;SourceNumber=0
+            Variant=0;TextureKind='uni';HasSkin=$false;Sex='female'
+            HairMode='';HideHair=$false
+            Textures=@([pscustomobject]@{Letter='a';File=(Get-Item -LiteralPath $textureFixture)})
+        }
+        Start-AddonBuildWorker @($testPiece) 'saida_teste' $addonFixture
+        if(-not $script:AddonBuildProcess.WaitForExit(120000)){
+            try{$script:AddonBuildProcess.Kill()}catch{}
+            throw 'Gerador em segundo plano não terminou em 120 segundos.'
+        }
+        $script:AddonBuildTimer.Stop()
+        $workerResult=[IO.File]::ReadAllText($script:AddonBuildResult)
+        if(-not $workerResult.StartsWith('OK|')){throw ('Gerador em segundo plano falhou: '+$workerResult)}
+        if(-not (Test-Path -LiteralPath (Join-Path $addonFixture 'fxmanifest.lua'))){throw 'Worker não gerou o fxmanifest.lua.'}
+        $script:AddonBuildProcess.Dispose();$script:AddonBuildProcess=$null
+        $btnBuildAddon.IsEnabled=$true
         $env:MT_PACK_ORGANIZER_PICKER_TEST_PATH=$fixture
         try {
             if((Select-PackFolder) -ne $fixture){throw 'O seletor de pasta inicial não confirmou a pasta escolhida.'}
