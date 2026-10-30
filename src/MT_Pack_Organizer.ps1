@@ -4539,7 +4539,7 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         # que a tarefa respondeu, criou o resource e não deixou a UI presa.
         $textureFixture=Join-Path $fixture 'jbib_diff_000_a_uni.ytd'
         [IO.File]::WriteAllBytes($textureFixture,[byte[]](1,2,3,4))
-        $addonFixture=Join-Path $fixture 'saida_teste'
+        $addonFixture=$fixture+'_addon_saida_teste'
         $testPiece=[pscustomobject]@{
             Ydd=(Get-Item -LiteralPath (Join-Path $fixture 'jbib_000_u.ydd'))
             Slot='jbib';TypeNumeric=8;IsProp=$false;SourceNumber=0
@@ -4616,6 +4616,7 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
     } finally {
         $win.Close()
         if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
+        if($addonFixture -and (Test-Path -LiteralPath $addonFixture)){Remove-Item -LiteralPath $addonFixture -Recurse -Force}
         if(Test-Path -LiteralPath $legacyFixture){Remove-Item -LiteralPath $legacyFixture -Recurse -Force}
     }
     Write-Host 'MT_PACK_ORGANIZER_UI_SELFTEST_OK'
