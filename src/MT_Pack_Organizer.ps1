@@ -2369,16 +2369,47 @@ function Update-TextureDeleteButton {
     $item = $lstTextures.SelectedItem
     if ($null -eq $item -or $null -eq $item.Tag -or [string]::IsNullOrWhiteSpace([string]$item.Tag)) {
         $btnDeleteTexture.IsEnabled = $false
+        if($btnExportTexture){$btnExportTexture.IsEnabled=$false}
         $btnDeleteTexture.Content = 'EXCLUIR TEXTURA SELECIONADA'
         return
     }
     $path = [string]$item.Tag
     $btnDeleteTexture.IsEnabled = $true
+    if($btnExportTexture){$btnExportTexture.IsEnabled=$true}
     if ($script:TextureDeletions.ContainsKey($path)) {
         $btnDeleteTexture.Content = 'CANCELAR EXCLUSÃO DA TEXTURA'
     } else {
         $btnDeleteTexture.Content = 'EXCLUIR TEXTURA SELECIONADA'
     }
+}
+
+function Export-SelectedTexture {
+    $item=$lstTextures.SelectedItem
+    if($null -eq $item -or $null -eq $item.Tag){return}
+    $file=New-Object IO.FileInfo ([string]$item.Tag)
+    if(-not $file.Exists){Show-MTNotice 'TEXTURA NÃO ENCONTRADA' 'O arquivo original desta textura não está mais disponível.';return}
+    $textures=@(Get-TexturesCached $file)
+    if($textures.Count -eq 0 -or $null -eq $textures[0].Bitmap){
+        Show-MTNotice 'NÃO FOI POSSÍVEL EXPORTAR' 'Esta YTD não contém uma textura que possa ser convertida em PNG.'
+        return
+    }
+    # Nunca exporta a miniatura nem a versão iluminada do modelo 3D.
+    $source=$textures[0].Bitmap
+    $save=New-Object Microsoft.Win32.SaveFileDialog
+    $save.Title='Exportar textura selecionada'
+    $save.Filter='Imagem PNG (*.png)|*.png'
+    $save.DefaultExt='.png'
+    $save.AddExtension=$true
+    $save.OverwritePrompt=$true
+    $save.FileName=([IO.Path]::GetFileNameWithoutExtension($file.Name)+'.png')
+    $save.InitialDirectory=if(Test-Path -LiteralPath $file.DirectoryName -PathType Container){$file.DirectoryName}else{[Environment]::GetFolderPath('MyPictures')}
+    if($save.ShowDialog($win) -ne $true){return}
+    $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder
+    $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($source))
+    $output=[IO.File]::Create($save.FileName)
+    try {$encoder.Save($output)} finally {$output.Dispose()}
+    Write-AppLog ("Textura exportada: $($file.Name) → $($save.FileName) ($($source.PixelWidth)x$($source.PixelHeight))")
+    Show-MTNotice 'TEXTURA EXPORTADA!' "PNG salvo com a resolução original: $($source.PixelWidth)×$($source.PixelHeight).`n`n$($save.FileName)"
 }
 
 function Toggle-TextureDelete {
@@ -3881,7 +3912,7 @@ $xamlText = @'
             <Separator Grid.Row="3" Margin="0,12,0,10" Background="#2D2931"/>
             <Grid Grid.Row="4"><TextBlock Text="TEXTURAS" Foreground="#D6A1EE" FontSize="11" FontWeight="Bold"/><TextBlock Name="lblTextureCount" Text="0 TEXTURAS" Foreground="#A399AB" FontSize="10" HorizontalAlignment="Right"/></Grid>
             <TextBlock Grid.Row="5" Text="Miniatura • formato • resolução" Foreground="#958A9E" FontSize="10" Margin="0,6,0,9"/>
-            <Grid Grid.Row="6"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ListBox Name="lstTextures"/><TextBlock Name="lblTextureInfo" Grid.Row="1" Foreground="#A49AA9" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/><Button Name="btnDeleteTexture" Grid.Row="2" Content="EXCLUIR TEXTURA SELECIONADA" Height="40" Margin="0,10,0,12" Background="#211619" BorderBrush="#8E3D4A" Foreground="#FFB5BE"/></Grid>
+            <Grid Grid.Row="6"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ListBox Name="lstTextures"/><TextBlock Name="lblTextureInfo" Grid.Row="1" Foreground="#A49AA9" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/><Button Name="btnExportTexture" Grid.Row="2" Content="EXPORTAR TEXTURA SELECIONADA" Height="40" Margin="0,10,0,0" Background="#31203E" BorderBrush="#79528F" Foreground="#E5C3F5"/><Button Name="btnDeleteTexture" Grid.Row="3" Content="EXCLUIR TEXTURA SELECIONADA" Height="40" Margin="0,8,0,12" Background="#211619" BorderBrush="#8E3D4A" Foreground="#FFB5BE"/></Grid>
         </Grid></Border>
 
         <Border Grid.Column="2" Background="#09090B" CornerRadius="13" BorderBrush="#252229" BorderThickness="1" ClipToBounds="True"><Grid Name="viewHost" Background="#09090B" Focusable="True"><Viewport3D Name="viewport"/>
@@ -3982,7 +4013,7 @@ try {
 foreach($n in @(
     'btnUpdate','btnHelp','btnHome','btnNewProject','lblHomeProjects','lblHomeReviewed','lblHomeKeep','lblHomeDelete','packHeaderInfo','lblPackName','lblPackPath','emptyState','mainContent',
     'lblPieceIndex','lblPieceName','lblPiecePath','lblMesh','lblDetectedCategory','lblVersion','btnPrev','btnNext','btnFirst','btnLast','btnNextPending','lblPendingJump','cmbCategory','chkHideHair','lstRecentProjects','lblNoProjects',
-    'lstTextures','lblTextureCount','lblTextureInfo','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','btnResetPosition','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
+    'lstTextures','lblTextureCount','lblTextureInfo','btnExportTexture','btnDeleteTexture','viewport','viewHost','btnLightDown','btnLightUp','btnResetPosition','lblLightValue','transformBox','lblTransformHint','hoverLeft','hoverRight','hoverTop','hoverBottom','hoverNW','hoverNE','hoverSW','hoverSE','centerAxisWidget','centerAxisX','centerAxisY','centerAxisZ','centerTipX','centerTipY','centerTipZ','centerRotateRing','texturePreviewPopup','imgTexturePreview','lblTexturePreviewName','lblTexturePreviewMeta',
     'decisionDot','lblDecision','btnKeep','btnDelete','btnUndo',
     'lblDone','progress','lblKeepCount','lblDeleteCount','btnApply','txtAddonName','btnBuildAddon','lblBuildStatus','btnWinMin','btnWinMax','btnWinClose','topHeader','imgBrandLogo','imgEmptyLogo','imgHomeGraffitiLeft','imgHomeGraffitiRight','loadingOverlay','imgLoadingButterflyLeft','imgLoadingButterflyRight','lblLoading','lblLoadingActivity','lblLoadingPercent','loadingProgress'
 )) { Set-Variable -Name $n -Value $win.FindName($n) -Scope Script }
@@ -4012,7 +4043,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.48'
+$script:AppVersion = '0.9.49'
 $script:ButterflyFrameTimer=$null
 $script:ButterflyFrameIndex=0
 $script:ButterflyFrames=@()
@@ -4231,6 +4262,7 @@ $btnDelete.Add_Click({ Invoke-Safe { Mark-Current 'EXCLUIR' } })
 $btnUndo.Add_Click({ Invoke-Safe { Undo-Last } })
 $btnApply.Add_Click({ Invoke-Safe { Apply-Removals } })
 $btnDeleteTexture.Add_Click({ Invoke-Safe { Toggle-TextureDelete } })
+$btnExportTexture.Add_Click({ Invoke-Safe { Export-SelectedTexture } })
 $btnBuildAddon.Add_Click({
     if(-not $btnBuildAddon.IsEnabled){return}
     $btnBuildAddon.IsEnabled=$false
