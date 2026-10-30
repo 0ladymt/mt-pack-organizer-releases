@@ -3013,7 +3013,7 @@ function Get-DefaultAddonName {
 }
 
 function Ensure-NugetDll([string]$id,[string]$version,[string]$dllName) {
-    $backend=Join-Path $PSScriptRoot 'backend'
+    $backend=if($script:AddonBackendRoot){$script:AddonBackendRoot}else{Join-Path $PSScriptRoot 'backend'}
     New-Item -ItemType Directory -Force -Path $backend | Out-Null
     $target=Join-Path $backend $dllName
     if(Test-Path $target){return $target}
@@ -3418,6 +3418,10 @@ function Get-KeptBuildPieces {
 
 $script:LastAddonUiPulse=[DateTime]::MinValue
 function Update-AddonBuildProgress([string]$message,[bool]$force=$false) {
+    if($script:WorkerProgressPath){
+        [IO.File]::WriteAllText($script:WorkerProgressPath,$message,[Text.Encoding]::UTF8)
+        return
+    }
     if($lblBuildStatus){$lblBuildStatus.Text=$message}
     $now=[DateTime]::UtcNow
     if($force -or ($now-$script:LastAddonUiPulse).TotalMilliseconds -ge 70){
@@ -3467,6 +3471,10 @@ function Build-FiveMAddon {
         $lblBuildStatus.Text='Geração cancelada.'
         return
     }
+    Start-AddonBuildWorker $kept $base $outRoot
+}
+
+function Invoke-AddonBuildCore($kept,[string]$base,[string]$outRoot) {
     Update-AddonBuildProgress 'Preparando gerador e DLCs...' $true
     Ensure-AddonBuilderBackend
     $stream=Join-Path $outRoot 'stream'
@@ -3598,9 +3606,105 @@ Distribuição:
 $($categoryLines -join [Environment]::NewLine)
 "@
     Set-Content -LiteralPath (Join-Path $outRoot 'BUILD_SUMMARY.txt') -Value $summary -Encoding UTF8
-    $lblBuildStatus.Text="Concluído: 1 resource / $($made.Count) DLC(s)"
-    Show-MTNotice 'ADD-ON GERADO!' "Seu add-on foi gerado com sucesso.`n`n1 resource com $($made.Count) DLC(s).`n`nDestino: $outRoot"
-    Start-Process explorer.exe $outRoot
+    return $made.Count
+}
+
+function Start-AddonBuildWorker($kept,[string]$base,[string]$outRoot) {
+    if($script:AddonBuildProcess -and -not $script:AddonBuildProcess.HasExited){return}
+    # Cada geração tem seus próprios arquivos de controle. Os originais nunca
+    # são movidos e a tarefa continua isolada do Dispatcher WPF.
+    $jobDir=Join-Path $StateDir ('addon_job_'+[Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($jobDir) | Out-Null
+    $workerPath=Join-Path $jobDir 'worker.ps1'
+    $dataPath=Join-Path $jobDir 'input.clixml'
+    $progressPath=Join-Path $jobDir 'progress.txt'
+    $resultPath=Join-Path $jobDir 'result.txt'
+    $payload=@{
+        Base=$base;OutRoot=$outRoot
+        Kept=@(foreach($p in $kept){
+            [pscustomobject]@{
+                Ydd=[pscustomobject]@{Name=$p.Ydd.Name;FullName=$p.Ydd.FullName}
+                Slot=$p.Slot;TypeNumeric=$p.TypeNumeric;IsProp=$p.IsProp
+                SourceNumber=$p.SourceNumber;Variant=$p.Variant;TextureKind=$p.TextureKind
+                HasSkin=$p.HasSkin;Sex=$p.Sex;HairMode=$p.HairMode;HideHair=$p.HideHair
+                Textures=@(foreach($t in $p.Textures){[pscustomobject]@{
+                    Letter=$t.Letter;File=[pscustomobject]@{FullName=$t.File.FullName}
+                }})
+            }
+        })
+    }
+    $payload | Export-Clixml -LiteralPath $dataPath -Depth 8
+
+    # Inclui somente funções do gerador: o processo não abre outra janela WPF.
+    $source=[IO.File]::ReadAllText((Join-Path $AppRoot 'MT_Pack_Organizer.ps1'))
+    $tokens=$null;$parseErrors=$null
+    $ast=[System.Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$parseErrors)
+    if($parseErrors.Count -gt 0){throw 'Não foi possível iniciar o gerador isolado: fonte inválida.'}
+    $needed=@('Ensure-NugetDll','Ensure-AddonBuilderBackend','Write-ShopMeta','Get-HairEntries','Write-PedAlternativeMeta','Write-FxManifest','Update-AddonBuildProgress','Invoke-AddonBuildCore')
+    $definitions=@(foreach($name in $needed){
+        $fn=$ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true) | Select-Object -First 1
+        if(-not $fn){throw "Função do gerador ausente: $name"}
+        $fn.Extent.Text
+    })
+    $workerHeader=@'
+param([string]$DataPath,[string]$ProgressPath,[string]$ResultPath)
+$ErrorActionPreference='Stop'
+$script:WorkerProgressPath=$ProgressPath
+$script:AddonBackendRoot=Join-Path (Split-Path $PSScriptRoot -Parent) 'backend'
+Add-Type -AssemblyName System.Windows.Forms
+'@
+    $workerFooter=@'
+try {
+    $inputData=Import-Clixml -LiteralPath $DataPath
+    $count=Invoke-AddonBuildCore @($inputData.Kept) ([string]$inputData.Base) ([string]$inputData.OutRoot)
+    [IO.File]::WriteAllText($ResultPath,("OK|{0}" -f $count),[Text.Encoding]::UTF8)
+} catch {
+    [IO.File]::WriteAllText($ResultPath,("ERROR|" + $_.Exception.ToString()),[Text.Encoding]::UTF8)
+    exit 1
+}
+'@
+    [IO.File]::WriteAllText($workerPath,($workerHeader+"`r`n"+($definitions -join "`r`n`r`n")+"`r`n"+$workerFooter),(New-Object Text.UTF8Encoding($true)))
+    $psi=New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName=(Get-Command powershell.exe).Source
+    $psi.Arguments=('-NoLogo -NoProfile -ExecutionPolicy Bypass -File "{0}" -DataPath "{1}" -ProgressPath "{2}" -ResultPath "{3}"' -f $workerPath,$dataPath,$progressPath,$resultPath)
+    $psi.UseShellExecute=$false
+    $psi.CreateNoWindow=$true
+    $script:AddonBuildProcess=[Diagnostics.Process]::Start($psi)
+    $script:AddonBuildResult=$resultPath
+    $script:AddonBuildProgress=$progressPath
+    $script:AddonBuildDestination=$outRoot
+    $lblBuildStatus.Text='Gerando add-on em segundo plano...'
+    $script:AddonBuildTimer=New-Object Windows.Threading.DispatcherTimer
+    $script:AddonBuildTimer.Interval=[TimeSpan]::FromMilliseconds(160)
+    $script:AddonBuildTimer.Add_Tick({
+        try {
+            if(Test-Path -LiteralPath $script:AddonBuildProgress){
+                $progress=[IO.File]::ReadAllText($script:AddonBuildProgress)
+                if($progress){$lblBuildStatus.Text=$progress}
+            }
+            if(-not $script:AddonBuildProcess.HasExited){return}
+            $script:AddonBuildTimer.Stop()
+            $status=if(Test-Path -LiteralPath $script:AddonBuildResult){[IO.File]::ReadAllText($script:AddonBuildResult)}else{'ERROR|O gerador terminou sem informar o resultado.'}
+            if($status.StartsWith('OK|')){
+                $count=$status.Substring(3)
+                $lblBuildStatus.Text="Concluído: 1 resource / $count DLC(s)"
+                Show-MTNotice 'ADD-ON GERADO!' "Seu add-on foi gerado com sucesso.`n`n1 resource com $count DLC(s).`n`nDestino: $script:AddonBuildDestination"
+                Start-Process explorer.exe -ArgumentList ('"'+$script:AddonBuildDestination+'"')
+            } else {
+                $lblBuildStatus.Text='Falha na geração do add-on.'
+                Show-Error ($status.Substring(6))
+            }
+            $script:AddonBuildProcess.Dispose()
+            $script:AddonBuildProcess=$null
+            $btnBuildAddon.IsEnabled=$true
+        } catch {
+            $script:AddonBuildTimer.Stop()
+            $script:AddonBuildProcess=$null
+            $btnBuildAddon.IsEnabled=$true
+            Show-Error ('Falha ao acompanhar a geração: '+$_.Exception.Message)
+        }
+    })
+    $script:AddonBuildTimer.Start()
 }
 
 function Invoke-AddonBackendSelfTest {
@@ -3908,7 +4012,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.47'
+$script:AppVersion = '0.9.48'
 $script:ButterflyFrameTimer=$null
 $script:ButterflyFrameIndex=0
 $script:ButterflyFrames=@()
