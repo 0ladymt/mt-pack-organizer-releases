@@ -2729,83 +2729,19 @@ function Confirm-And-InstallUpdate {
 }
 
 function Select-PackFolder {
-    $modal=New-ProjectModal 'Abrir um pack' 'Localize a pasta stream do pack ou cole o caminho da pasta abaixo.' 650 640
-    $dialog=$modal.Window
-    $state=[pscustomobject]@{Path='';Chosen=''}
-    $toolbar=New-Object Windows.Controls.StackPanel
-    $toolbar.Orientation='Horizontal';$toolbar.Margin='0,0,0,12'
-    $back=New-ModalButton '↑  VOLTAR'
-    $back.Width=115;$back.Margin='0,0,8,0'
-    $pc=New-ModalButton 'ESTE COMPUTADOR';$pc.Width=170;$pc.Margin='0'
-    [void]$toolbar.Children.Add($back);[void]$toolbar.Children.Add($pc)
-    [void]$modal.Content.Children.Add($toolbar)
-    $pathBox=New-Object Windows.Controls.TextBox
-    $pathBox.Height=39;$pathBox.FontSize=12;$pathBox.Padding='11,8'
-    $pathBox.Background=New-SolidBrush '#1C1922';$pathBox.Foreground=New-SolidBrush '#FFFFFF'
-    $pathBox.BorderBrush=New-SolidBrush '#50415D';$pathBox.Margin='0,0,0,12'
-    $pathBox.ToolTip='Digite ou cole o caminho completo de uma pasta e pressione Enter'
-    [void]$modal.Content.Children.Add($pathBox)
-    $folderList=New-Object Windows.Controls.ListBox
-    $folderList.Height=300;$folderList.DisplayMemberPath='Name';$folderList.FontSize=13
-    $folderList.Background=New-SolidBrush '#17151C';$folderList.Foreground=New-SolidBrush '#F1EAF7'
-    $folderList.BorderBrush=New-SolidBrush '#322939';$folderList.Padding='9'
-    [void]$modal.Content.Children.Add($folderList)
-    $tip=New-Object Windows.Controls.TextBlock
-    $tip.Text='Clique duas vezes para entrar em uma pasta. Clique em ABRIR ESTA PASTA para selecioná-la.'
-    $tip.Foreground=New-SolidBrush '#82798B';$tip.FontSize=10;$tip.Margin='0,11,0,0'
-    [void]$modal.Content.Children.Add($tip)
-    $cancel=New-ModalButton 'CANCELAR'
-    $select=New-ModalButton 'ABRIR ESTA PASTA' $true
-    $select.Width=174
-    [void]$modal.Footer.Children.Add($cancel);[void]$modal.Footer.Children.Add($select)
-    $refresh={
-        param([string]$newPath)
-        $folderList.Items.Clear()
-        if([string]::IsNullOrWhiteSpace($newPath)){
-            $state.Path='';$pathBox.Text='Este Computador'
-            foreach($drive in [IO.DriveInfo]::GetDrives()){
-                if($drive.IsReady){[void]$folderList.Items.Add([pscustomobject]@{Name=('💾  '+$drive.Name);FullName=$drive.RootDirectory.FullName})}
-            }
-            return
-        }
-        if(-not (Test-Path -LiteralPath $newPath -PathType Container)){return}
-        $state.Path=[IO.Path]::GetFullPath($newPath);$pathBox.Text=$state.Path
-        try {
-            $folders=@(Get-ChildItem -LiteralPath $state.Path -Directory -ErrorAction Stop | Sort-Object Name)
-            foreach($folder in $folders){[void]$folderList.Items.Add([pscustomobject]@{Name=('📁  '+$folder.Name);FullName=$folder.FullName})}
-        } catch { Write-AppLog ('Navegar pasta: '+$_.Exception.Message) }
-    }.GetNewClosure()
-    $back.Add_Click({
-        if($state.Path){$parent=[IO.Directory]::GetParent($state.Path);if($parent){& $refresh $parent.FullName}else{& $refresh ''}}
-    }.GetNewClosure())
-    $pc.Add_Click({& $refresh ''}.GetNewClosure())
-    $folderList.Add_MouseDoubleClick({
-        if($folderList.SelectedItem){& $refresh ([string]$folderList.SelectedItem.FullName)}
-    }.GetNewClosure())
-    $pathBox.Add_KeyDown({param($s,$e)
-        if($e.Key -eq 'Return'){
-            $candidate=$pathBox.Text.Trim(' ','"')
-            if(Test-Path -LiteralPath $candidate -PathType Container){& $refresh $candidate}
-            $e.Handled=$true
-        }
-    }.GetNewClosure())
-    $cancel.Add_Click({$dialog.DialogResult=$false}.GetNewClosure())
-    $select.Add_Click({
-        $candidate=$pathBox.Text.Trim(' ','"')
-        if(Test-Path -LiteralPath $candidate -PathType Container){$state.Chosen=[IO.Path]::GetFullPath($candidate);$dialog.DialogResult=$true}
-        elseif($state.Path -and (Test-Path -LiteralPath $state.Path -PathType Container)){$state.Chosen=$state.Path;$dialog.DialogResult=$true}
-    }.GetNewClosure())
+    # Mesmo seletor nativo branco usado para escolher o destino do add-on.
     $initial=Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
     if($script:PackPath -and (Test-Path -LiteralPath $script:PackPath -PathType Container)){$initial=$script:PackPath}
-    if(Test-Path -LiteralPath $initial -PathType Container){& $refresh $initial}else{& $refresh ''}
+    $folderDialog=New-Object System.Windows.Forms.FolderBrowserDialog
+    $folderDialog.Description='Selecione a pasta stream do pack ou a pasta que contém as peças.'
+    $folderDialog.ShowNewFolderButton=$false
+    if(Test-Path -LiteralPath $initial -PathType Container){$folderDialog.SelectedPath=$initial}
     if($env:MT_PACK_ORGANIZER_UITEST -eq '1' -and $env:MT_PACK_ORGANIZER_PICKER_TEST_PATH){
-        [void]$dialog.Dispatcher.BeginInvoke([Action]{
-            Save-ModalPreview $dialog 'abrir'
-            $pathBox.Text=$env:MT_PACK_ORGANIZER_PICKER_TEST_PATH
-            $select.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
-        }.GetNewClosure(),[Windows.Threading.DispatcherPriority]::Loaded)
+        $fixture=$env:MT_PACK_ORGANIZER_PICKER_TEST_PATH
+        if(Test-Path -LiteralPath $fixture -PathType Container){return [IO.Path]::GetFullPath($fixture)}
+        return $null
     }
-    if((Show-ProjectModal $dialog) -eq $true){return [string]$state.Chosen}
+    if($folderDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){return [IO.Path]::GetFullPath($folderDialog.SelectedPath)}
     return $null
 }
 
@@ -3480,6 +3416,19 @@ function Get-KeptBuildPieces {
     return $out
 }
 
+$script:LastAddonUiPulse=[DateTime]::MinValue
+function Update-AddonBuildProgress([string]$message,[bool]$force=$false) {
+    if($lblBuildStatus){$lblBuildStatus.Text=$message}
+    $now=[DateTime]::UtcNow
+    if($force -or ($now-$script:LastAddonUiPulse).TotalMilliseconds -ge 70){
+        $script:LastAddonUiPulse=$now
+        if($win -and $win.Dispatcher){
+            [void]$win.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Background)
+        }
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+}
+
 function Build-FiveMAddon {
     if(-not $script:PackPath){return}
     $kept=@(Get-KeptBuildPieces)
@@ -3499,6 +3448,7 @@ function Build-FiveMAddon {
     $folderDialog.ShowNewFolderButton=$true
     $folderDialog.SelectedPath=Split-Path $script:PackPath -Parent
     if($folderDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK){$lblBuildStatus.Text='Geração cancelada.';return}
+    Update-AddonBuildProgress 'Verificando pasta de destino...' $true
     # Se a pessoa já criou/selecionou uma pasta com o nome do add-on,
     # use-a diretamente. Evita "teste\teste" quando a escolha foi "teste".
     $selectedFolder=[IO.Path]::GetFullPath($folderDialog.SelectedPath)
@@ -3517,8 +3467,7 @@ function Build-FiveMAddon {
         $lblBuildStatus.Text='Geração cancelada.'
         return
     }
-    $lblBuildStatus.Text='Preparando DLCs...'
-    [System.Windows.Forms.Application]::DoEvents()
+    Update-AddonBuildProgress 'Preparando gerador e DLCs...' $true
     Ensure-AddonBuilderBackend
     $stream=Join-Path $outRoot 'stream'
     New-Item -ItemType Directory -Force -Path $stream | Out-Null
@@ -3538,6 +3487,7 @@ function Build-FiveMAddon {
                 HasSkin=$p.HasSkin;Sex=$p.Sex;HairMode=$p.HairMode;HideHair=$p.HideHair;
                 Textures=$p.Textures;DlcIndex=$dlcIndex;NewNumber=$newNumber
             }
+            Update-AddonBuildProgress "Organizando $($prepared.Count) de $($kept.Count) peças..."
         }
     }
 
@@ -3559,6 +3509,7 @@ function Build-FiveMAddon {
             $gender=if($sex -eq 'male'){'[male]'}else{'[female]'}
 
             foreach($p in $sx) {
+                Update-AddonBuildProgress "Gerando DLC $di de $maxDlc • $($p.Slot)..."
                 $folder=Join-Path (Join-Path $stream $gender) $p.Slot
                 if(-not $createdDirs.ContainsKey($folder)){
                     [IO.Directory]::CreateDirectory($folder) | Out-Null
@@ -3593,6 +3544,7 @@ function Build-FiveMAddon {
                 $specs.Add($sp)
             }
             [MtAddonYmtBuilder]::Build((Join-Path $stream ("${ped}_${project}.ymt")),$project,$specs.ToArray())
+            Update-AddonBuildProgress "Finalizando metadados do DLC $di..." $true
             $alt=Write-PedAlternativeMeta $outRoot $project $sex $sx
             if($alt){$altFiles += $alt}
         }
@@ -3603,6 +3555,7 @@ function Build-FiveMAddon {
     # Confere os nomes que o FiveM realmente vai resolver antes de concluir.
     $validationErrors=New-Object 'System.Collections.Generic.List[string]'
     foreach($p in @($prepared)) {
+        Update-AddonBuildProgress "Conferindo arquivos do add-on..."
         $project='{0}_{1:D2}' -f $base,$p.DlcIndex
         $ped=if($p.Sex -eq 'male'){'mp_m_freemode_01'}else{'mp_f_freemode_01'}
         $gender=if($p.Sex -eq 'male'){'[male]'}else{'[female]'}
@@ -3955,7 +3908,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.46'
+$script:AppVersion = '0.9.47'
 $script:ButterflyFrameTimer=$null
 $script:ButterflyFrameIndex=0
 $script:ButterflyFrames=@()
@@ -4174,7 +4127,12 @@ $btnDelete.Add_Click({ Invoke-Safe { Mark-Current 'EXCLUIR' } })
 $btnUndo.Add_Click({ Invoke-Safe { Undo-Last } })
 $btnApply.Add_Click({ Invoke-Safe { Apply-Removals } })
 $btnDeleteTexture.Add_Click({ Invoke-Safe { Toggle-TextureDelete } })
-$btnBuildAddon.Add_Click({ Invoke-Safe { Build-FiveMAddon } })
+$btnBuildAddon.Add_Click({
+    if(-not $btnBuildAddon.IsEnabled){return}
+    $btnBuildAddon.IsEnabled=$false
+    try { Invoke-Safe { Build-FiveMAddon } }
+    finally {$btnBuildAddon.IsEnabled=$true}
+})
 $btnWinMin.Add_Click({$win.WindowState='Minimized'})
 $btnWinMax.Add_Click({ if($win.WindowState -eq 'Maximized'){$win.WindowState='Normal'}else{$win.WindowState='Maximized'} })
 $btnWinClose.Add_Click({$win.Close()})
@@ -4475,7 +4433,7 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_001_u.ydd'),[byte[]](1,2,3,4))
         $env:MT_PACK_ORGANIZER_PICKER_TEST_PATH=$fixture
         try {
-            if((Select-PackFolder) -ne $fixture){throw 'O seletor de pasta estilizado não confirmou a pasta escolhida.'}
+            if((Select-PackFolder) -ne $fixture){throw 'O seletor de pasta inicial não confirmou a pasta escolhida.'}
         } finally {Remove-Item Env:MT_PACK_ORGANIZER_PICKER_TEST_PATH -ErrorAction SilentlyContinue}
         if(Confirm-RemoveProject 'Projeto de teste' $fixture){throw 'O botão cancelar do diálogo de exclusão não funcionou.'}
         Open-PackPath $fixture
