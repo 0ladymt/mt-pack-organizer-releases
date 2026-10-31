@@ -1570,6 +1570,11 @@ function Find-Variants([IO.FileInfo]$Ydd) {
         $key=Get-VariantIndexKey $Ydd.DirectoryName $prefix ([string]$Matches.slot) ([int]$Matches.num) 'prop'
         if($script:VariantIndex -and $script:VariantIndex.ContainsKey($key)){return @($script:VariantIndex[$key] | Sort-Object Letter)}
     }
+    # PED personalizado: mesma base para o YDD e YTD na mesma pasta.
+    $pedTexture=Join-Path $Ydd.DirectoryName ($stem+'.ytd')
+    if(Test-Path -LiteralPath $pedTexture -PathType Leaf){
+        return @([pscustomobject]@{Letter='A';Kind='PED';IsRelative=$false;File=(New-Object IO.FileInfo $pedTexture)})
+    }
     return @()
 }
 
@@ -4043,7 +4048,7 @@ $script:MeshCacheOrder = @()
 $script:ThumbGeneration = 0
 $script:ThumbTimer = $null
 $script:PopulatingTextures = $false
-$script:AppVersion = '0.9.49'
+$script:AppVersion = '0.9.50'
 $script:ButterflyFrameTimer=$null
 $script:ButterflyFrameIndex=0
 $script:ButterflyFrames=@()
@@ -4563,8 +4568,16 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
     if($packHeaderInfo.Visibility -ne 'Collapsed'){throw 'O cabeçalho do início não deveria exibir o nome dos projetos.'}
     $fixture=Join-Path ([IO.Path]::GetTempPath()) ('MTPO_UI_TEST_'+[Guid]::NewGuid().ToString('N'))
     $legacyFixture=$fixture+'_legacy'
+    $pedFixture=$fixture+'_ped'
     try {
         [void](New-Item -ItemType Directory -Path $fixture -Force)
+        [void](New-Item -ItemType Directory -Path $pedFixture -Force)
+        $pedYdd=Join-Path $pedFixture 'ANGEL_AnaoCoby.ydd'
+        $pedYtd=Join-Path $pedFixture 'ANGEL_AnaoCoby.ytd'
+        [IO.File]::WriteAllBytes($pedYdd,[byte[]](1,2,3,4))
+        [IO.File]::WriteAllBytes($pedYtd,[byte[]](1,2,3,4))
+        $pedVariants=@(Find-Variants (Get-Item -LiteralPath $pedYdd))
+        if($pedVariants.Count -ne 1 -or $pedVariants[0].File.FullName -ne $pedYtd){throw 'A YTD com mesmo nome do PED não foi associada.'}
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_000_u.ydd'),[byte[]](1,2,3,4))
         [IO.File]::WriteAllBytes((Join-Path $fixture 'jbib_001_u.ydd'),[byte[]](1,2,3,4))
         # Integração real: executa o gerador fora do processo WPF e verifica
@@ -4650,6 +4663,7 @@ if($env:MT_PACK_ORGANIZER_UITEST -eq '1'){
         if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
         if($addonFixture -and (Test-Path -LiteralPath $addonFixture)){Remove-Item -LiteralPath $addonFixture -Recurse -Force}
         if(Test-Path -LiteralPath $legacyFixture){Remove-Item -LiteralPath $legacyFixture -Recurse -Force}
+        if(Test-Path -LiteralPath $pedFixture){Remove-Item -LiteralPath $pedFixture -Recurse -Force}
     }
     Write-Host 'MT_PACK_ORGANIZER_UI_SELFTEST_OK'
     exit 0
